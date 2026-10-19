@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
@@ -10,7 +9,7 @@ from sklearn.linear_model import LinearRegression
 # Konfigurasi Halaman
 st.set_page_config(page_title="DSS Pariwisata Yogyakarta", layout="wide")
 
-st.title("📊 Sistem Pendukung Keputusan (DSS) Pariwisata Yogyakarta - Versi 2.0")
+st.title("📊 Sistem Pendukung Keputusan (DSS) Pariwisata Yogyakarta - Versi 2.1")
 st.markdown("**Tema:** Kesiapan Layanan (SDM), Distribusi Spasial, dan Peringatan Dini Overcrowding")
 st.divider()
 
@@ -89,7 +88,7 @@ if file_2024 and file_2025:
 
             with tab2:
                 st.subheader("📍 Simulasi Pemetaan Spasial Kepadatan")
-                st.markdown("Peta ini memvisualisasikan bagaimana kepadatan bergeser jika Anda menerapkan kebijakan pengurangan beban Malioboro.")
+                st.markdown("Peta ini memvisualisasikan persebaran titik destinasi penyangga (Kampung Wisata) di Yogyakarta.")
                 
                 # Membuat Data Dummy Koordinat untuk Visualisasi
                 data_peta = pd.DataFrame({
@@ -99,10 +98,27 @@ if file_2024 and file_2025:
                     'Pengunjung': [malioboro_simulasi, luar_simulasi*0.4, luar_simulasi*0.3, luar_simulasi*0.3]
                 })
                 
-                fig_map = px.scatter_mapbox(data_peta, lat="Lat", lon="Lon", size="Pengunjung", color="Pengunjung",
-                                            color_continuous_scale=px.colors.sequential.YlOrRd, size_max=40, zoom=12,
-                                            hover_name="Lokasi", mapbox_style="carto-positron")
-                fig_map.update_layout(height=500, margin={"r":0,"t":0,"l":0,"b":0})
+                # Menggunakan go.Scattermapbox yang lebih stabil dibandingkan px.scatter_mapbox
+                fig_map = go.Figure(go.Scattermapbox(
+                    lat=data_peta['Lat'],
+                    lon=data_peta['Lon'],
+                    mode='markers',
+                    marker=go.scattermapbox.Marker(
+                        size=18,
+                        color='#e74c3c',
+                        opacity=0.8
+                    ),
+                    text=data_peta['Lokasi'] + "<br>Estimasi Pengunjung: " + data_peta['Pengunjung'].astype(int).astype(str),
+                    hoverinfo='text'
+                ))
+                
+                fig_map.update_layout(
+                    mapbox_style="carto-positron",
+                    mapbox_zoom=12,
+                    mapbox_center={"lat": -7.81, "lon": 110.38},
+                    margin={"r":0,"t":0,"l":0,"b":0},
+                    height=500
+                )
                 st.plotly_chart(fig_map, use_container_width=True)
 
             with tab3:
@@ -117,7 +133,6 @@ if file_2024 and file_2025:
                 else:
                     st.success("✅ Kapasitas lalu lintas diproyeksikan aman sepanjang tahun.")
                 
-                # Grafik clustering musiman
                 fig_cluster = go.Figure()
                 color_map = {'Low Season': '#2ecc71', 'Normal Season': '#f1c40f', 'Peak Season': '#e74c3c'}
                 for season in ['Low Season', 'Normal Season', 'Peak Season']:
@@ -127,13 +142,12 @@ if file_2024 and file_2025:
                 fig_cluster.update_layout(height=400, template="plotly_white")
                 st.plotly_chart(fig_cluster, use_container_width=True)
 
-            # Jika file ke-3 diupload
             if file_opsional:
                 st.divider()
                 st.subheader("📂 Analisis Data Sektoral Tambahan")
                 df_opsional = pd.read_excel(file_opsional, sheet_name=0)
                 st.dataframe(df_opsional.head(10), use_container_width=True)
-                st.success("File tambahan berhasil diintegrasikan. Siap untuk diekstrak menjadi model analitik lanjutan.")
+                st.success("File tambahan berhasil diintegrasikan.")
 
     except Exception as e:
         st.error(f"Terjadi kesalahan saat memproses data. Log: {e}")
