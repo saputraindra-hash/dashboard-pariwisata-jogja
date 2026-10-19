@@ -9,7 +9,7 @@ from sklearn.linear_model import LinearRegression
 # Konfigurasi Halaman
 st.set_page_config(page_title="Dashboard Pariwisata Yogyakarta", layout="wide")
 
-st.title("📊 Dashboard Analitik Pariwisata Yogyakarta")
+st.title("📊 Sistem Pendukung Keputusan (DSS) Pariwisata Yogyakarta")
 st.markdown("**Tema:** Kesiapan Kualitas Layanan (SDM) vs Beban Volume Wisatawan")
 st.divider()
 
@@ -34,6 +34,8 @@ if file_2024 and file_2025:
             df_2024['Total Pengunjung'] = df_2024['Pengunjung Mancanegara'] + df_2024['Pengunjung Nusantara']
             df_2024['Luar Malioboro'] = df_2024['Total Pengunjung'] - df_2024['Malioboro']
             total_wisatawan = df_2024['Total Pengunjung'].sum()
+            total_malioboro_aktual = df_2024['Malioboro'].sum()
+            total_luar_aktual = df_2024['Luar Malioboro'].sum()
 
             def get_metric(df, keyword):
                 val = df.loc[df['Nama Data'].str.contains(keyword, case=False, na=False), 'Data 2025']
@@ -43,46 +45,71 @@ if file_2024 and file_2025:
             jumlah_pokdarwis = get_metric(df_2025, 'Jumlah Pokdarwis')
             kampung_wisata = get_metric(df_2025, 'Kampung Wisata')
 
+            # --- FITUR DSS (WHAT-IF ANALYSIS) ---
+            st.sidebar.divider()
+            st.sidebar.subheader("🎛️ Simulasi Kebijakan (What-If)")
+            st.sidebar.markdown("Target Pengurangan Beban Malioboro:")
+            target_distribusi = st.sidebar.slider("Pindahkan ke Destinasi Lain (%)", min_value=0, max_value=50, value=0, step=5)
+            
+            # Kalkulasi Simulasi
+            pengurangan_malioboro = (total_malioboro_aktual * target_distribusi) / 100
+            malioboro_simulasi = total_malioboro_aktual - pengurangan_malioboro
+            luar_simulasi = total_luar_aktual + pengurangan_malioboro
+
             # --- MACHINE LEARNING ALGORITHMS ---
-            # 1. K-Means Clustering (Deteksi Musiman)
             X_cluster = df_2024[['Total Pengunjung']].values
             kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
             df_2024['Cluster_ID'] = kmeans.fit_predict(X_cluster)
-            
-            # Mengurutkan klaster dari terkecil ke terbesar
             cluster_centers = kmeans.cluster_centers_.flatten()
             sorted_idx = np.argsort(cluster_centers)
             cluster_map = {sorted_idx[0]: 'Low Season', sorted_idx[1]: 'Normal Season', sorted_idx[2]: 'Peak Season'}
             color_map = {'Low Season': '#2ecc71', 'Normal Season': '#f1c40f', 'Peak Season': '#e74c3c'}
             df_2024['Seasonality'] = df_2024['Cluster_ID'].map(cluster_map)
 
-            # 2. Linear Regression (Analisis Tren)
             X_trend = np.arange(len(df_2024)).reshape(-1, 1)
             y_trend = df_2024['Total Pengunjung'].values
             lin_reg = LinearRegression()
             lin_reg.fit(X_trend, y_trend)
             df_2024['Trend_Line'] = lin_reg.predict(X_trend)
 
-            # --- METRIK UTAMA (KPI) ---
-            st.subheader("Ringkasan Eksekutif")
+            # --- PANEL 1: RINGKASAN AKTUAL ---
+            st.subheader("Ringkasan Eksekutif (Aktual 2024-2025)")
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Wisatawan (2024)", f"{total_wisatawan:,.0f}")
-            col2.metric("Pengunjung Malioboro", f"{df_2024['Malioboro'].sum():,.0f}")
+            col1.metric("Total Wisatawan", f"{total_wisatawan:,.0f}")
+            col2.metric("Beban Malioboro", f"{total_malioboro_aktual:,.0f}")
             col3.metric("SDM Tersertifikasi", f"{sdm_tersertifikasi:,.0f} Orang")
             col4.metric("Pokdarwis Aktif", f"{jumlah_pokdarwis:,.0f} Kelompok")
             st.divider()
 
-            # --- VISUALISASI DATA DASAR ---
+            # --- PANEL 2: SIMULASI KEBIJAKAN ---
+            if target_distribusi > 0:
+                st.subheader(f"🛡️ Proyeksi Simulasi: Pengurangan {target_distribusi}% Beban Malioboro")
+                st.info(f"Jika kebijakan ini diterapkan, **{pengurangan_malioboro:,.0f} wisatawan** akan dialihkan dari Malioboro menuju destinasi penyangga (Kampung Wisata/Lainnya).")
+                
+                col_sim1, col_sim2, col_sim3 = st.columns(3)
+                col_sim1.metric("Proyeksi Malioboro", f"{malioboro_simulasi:,.0f}", f"-{pengurangan_malioboro:,.0f} (-{target_distribusi}%)")
+                col_sim2.metric("Proyeksi Destinasi Lain", f"{luar_simulasi:,.0f}", f"+{pengurangan_malioboro:,.0f}")
+                
+                # EWS: Rasio beban ke Pokdarwis
+                beban_per_pokdarwis = luar_simulasi / jumlah_pokdarwis if jumlah_pokdarwis > 0 else 0
+                col_sim3.metric("Beban per Pokdarwis", f"{beban_per_pokdarwis:,.0f} Turis/Thn")
+
+                st.divider()
+
+            # --- PANEL 3: VISUALISASI ---
             st.subheader("Visualisasi Beban Wisatawan vs Kesiapan Layanan")
-            fig = make_subplots(rows=1, cols=2, specs=[[{"type": "xy"}, {"type": "domain"}]], subplot_titles=("Tren Demografi Pengunjung (2024)", "Keterpusatan Beban Malioboro"))
+            fig = make_subplots(rows=1, cols=2, specs=[[{"type": "xy"}, {"type": "domain"}]], subplot_titles=("Tren Demografi Pengunjung", "Keterpusatan Beban (Simulasi Aktif)"))
             fig.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Pengunjung Nusantara'], name="Nusantara", marker_color='#3498db'), row=1, col=1)
             fig.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Pengunjung Mancanegara'], name="Mancanegara", marker_color='#e74c3c'), row=1, col=1)
-            fig.add_trace(go.Pie(labels=['Malioboro', 'Destinasi Lainnya'], values=[df_2024['Malioboro'].sum(), df_2024['Luar Malioboro'].sum()], hole=0.4, marker_colors=['#f1c40f', '#2ecc71']), row=1, col=2)
+            
+            # Pie chart menggunakan data simulasi jika slider digeser
+            fig.add_trace(go.Pie(labels=['Malioboro', 'Destinasi Lainnya'], values=[malioboro_simulasi, luar_simulasi], hole=0.4, marker_colors=['#f1c40f', '#2ecc71']), row=1, col=2)
+            
             fig.update_layout(barmode='stack', height=400, template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
             st.divider()
 
-            # --- PANEL ALGORITMA ---
+            # --- PANEL 4: ALGORITMA ML ---
             st.subheader("🤖 Analisis Kecerdasan Buatan (Machine Learning)")
             col_alg1, col_alg2 = st.columns(2)
 
