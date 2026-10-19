@@ -64,4 +64,38 @@ if file_2024 and file_194 and file_112:
             
             fig_cap = go.Figure()
             fig_cap.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Total'], name="Total Wisatawan", marker_color='#3498db'))
-            fig_cap.add_hline(y=kapasitas_maksimal_bulanan, line_dash
+            fig_cap.add_hline(y=kapasitas_maksimal_bulanan, line_dash="dash", line_color="red", line_width=3, annotation_text="Batas Maksimal Kapasitas Kamar Kota")
+            fig_cap.update_layout(height=450, template="plotly_white")
+            st.plotly_chart(fig_cap, use_container_width=True)
+
+            # Tabel Kritis
+            st.dataframe(df_2024[['Bulan', 'Total', 'Rasio_Okupansi']].style.highlight_max(axis=0, color='red'), use_container_width=True)
+
+        with tab2:
+            st.subheader("Analisis Suntikan Dana Pariwisata ke Ekonomi Kota")
+            total_triliun = df_2024['Pendapatan_Miliar'].sum() / 1000
+            st.metric("Estimasi Uang Beredar dari Turis (1 Tahun)", f"Rp {total_triliun:.2f} Triliun", "Berdasarkan Rata-rata Belanja Rp 2,2 Juta/orang")
+            
+            # Simulasi Kenaikan Belanja
+            st.divider()
+            st.markdown("#### 🎛️ Simulasi Kebijakan: Jika *Length of Stay* Naik")
+            st.markdown("Jika wisatawan tinggal lebih lama, otomatis belanja mereka bertambah. Geser *slider* di bawah untuk melihat potensi peningkatan Triliunan Rupiah untuk kota.")
+            
+            target_kenaikan_belanja = st.slider("Kenaikan Belanja Wisatawan (%)", min_value=0, max_value=50, value=10)
+            belanja_baru = belanja_turis + (belanja_turis * target_kenaikan_belanja / 100)
+            pendapatan_tambahan_miliar = df_2024['Total'].sum() * (belanja_baru - belanja_turis) / 1000000000
+            
+            col_eco1, col_eco2 = st.columns(2)
+            col_eco1.metric("Proyeksi Belanja Baru per Turis", f"Rp {belanja_baru:,.0f}")
+            col_eco2.metric("Potensi Tambahan Pendapatan Kota", f"+ Rp {pendapatan_tambahan_miliar/1000:.2f} Triliun", f"Naik {target_kenaikan_belanja}%")
+
+            fig_eco = go.Figure()
+            fig_eco.add_trace(go.Scatter(x=df_2024['Bulan'], y=df_2024['Pendapatan_Miliar'], mode='lines+markers', name="Pendapatan Saat Ini (Miliar Rp)", fill='tozeroy'))
+            fig_eco.update_layout(height=400, template="plotly_white")
+            st.plotly_chart(fig_eco, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Terjadi kesalahan saat memproses data. Pastikan format file benar. Log: {e}")
+
+else:
+    st.info("👈 Silakan upload KETIGA file Excel (2024, 194, dan 112) di menu sidebar untuk menjalankan algoritma kompleks.")
