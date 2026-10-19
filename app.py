@@ -2,127 +2,66 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
+from plotly.subplots import make_subplots
 import re
 
-# Konfigurasi Halaman
-st.set_page_config(page_title="Executive Dashboard Pariwisata", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Advanced DSS Pariwisata", layout="wide")
 
-st.title("🏛️ Executive Dashboard Pariwisata Kota Yogyakarta")
-st.markdown("**Integrasi Data Statistik Sektoral & Indikator Kinerja Prioritas Daerah**")
+st.title("🧠 Advanced Decision Support System (DSS)")
+st.markdown("**Analisis Carrying Capacity (Daya Tampung) & Economic Multiplier Pariwisata Yogyakarta**")
 st.divider()
 
-# Area Upload File
 st.sidebar.header("📁 Upload Dataset")
-st.sidebar.markdown("Silakan upload 2 file terbaru:")
-file_194 = st.sidebar.file_uploader("1. Data Statistik Sektoral (194..._4.xlsx)", type=["xlsx"])
-file_112 = st.sidebar.file_uploader("2. Data Prioritas Dinas (112.xlsx)", type=["xlsx"])
+file_2024 = st.sidebar.file_uploader("1. Data Pengunjung (2024)", type=["xlsx"])
+file_194 = st.sidebar.file_uploader("2. Data Sektoral (194..._4.xlsx)", type=["xlsx"])
+file_112 = st.sidebar.file_uploader("3. Data Prioritas (112.xlsx)", type=["xlsx"])
 
-if file_194 and file_112:
+if file_2024 and file_194 and file_112:
     try:
-        # --- BACA DATA ---
+        # BACA DATA
+        df_2024 = pd.read_excel(file_2024, sheet_name=0)
         df_194 = pd.read_excel(file_194, sheet_name=0)
         df_112 = pd.read_excel(file_112, sheet_name=0)
 
-        # Fungsi Pembersih Data Numerik Khusus (Mencegah Error akibat titik/koma format uang)
-        def get_num(df, keyword):
-            try:
-                # Menggunakan regex=True agar pencarian lebih dinamis
-                val = df.loc[df['Nama Data'].str.contains(keyword, case=False, na=False, regex=True), 'Data 2025'].values[0]
-                if pd.isna(val) or val == 'SIMONEVA':
-                    return 0.0
-                if isinstance(val, str):
-                    # Hanya ambil angka, koma, dan titik
-                    val_clean = re.sub(r'[^\d,\.]', '', val)
-                    # Standarisasi pemisah ribuan dan desimal
-                    val_clean = val_clean.replace('.', '').replace(',', '.')
-                    return float(val_clean) if val_clean else 0.0
-                return float(val)
-            except:
-                return 0.0
+        # FUNGSI EKSTRAKSI DATA
+        def get_194(keyword):
+            val = df_194.loc[df_194['Nama Data'].str.contains(keyword, case=False, na=False, regex=True), 'Data 2025']
+            return float(val.values[0]) if not val.empty else 0.0
 
-        def get_str(df, keyword):
-            try:
-                val = df.loc[df['Nama Data'].str.contains(keyword, case=False, na=False, regex=True), 'Data 2025'].values[0]
-                return str(val) if not pd.isna(val) else "-"
-            except:
-                return "-"
+        def get_112(keyword):
+            val = df_112.loc[df_112['Nama Data'].str.contains(keyword, case=False, na=False, regex=True), 'Data 2025']
+            if val.empty or val.values[0] == 'SIMONEVA': return 0.0
+            v_str = str(val.values[0])
+            v_clean = re.sub(r'[^\d,\.]', '', v_str).replace('.', '').replace(',', '.')
+            return float(v_clean) if v_clean else 0.0
 
-        # --- EKSTRAKSI DATA FILE 112 (PRIORITAS & EKONOMI) ---
-        pdrb_akomodasi = get_num(df_112, 'PDRB Sektor Penyediaan Akomodasi')
-        belanja_wisatawan = get_num(df_112, 'Rata-Rata Belanja')
-        los_prioritas = get_num(df_112, 'Length of Stay')
-        dtw_prima = get_num(df_112, 'Persentase Daya Tarik Wisata.*Prima')
-        sdm_meningkat = get_num(df_112, 'Persentase Sumber Daya Manusia yang Meningkat')
-        rb_dinas = get_str(df_112, 'Nilai Reformasi Birokrasi')
-        sakip_dinas = get_str(df_112, 'Nilai  SAKIP')
-
-        # --- EKSTRAKSI DATA FILE 194 (SEKTORAL & VOLUMETRIK) ---
-        bulan_list = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+        # PEMROSESAN DATA 
+        df_2024['Total'] = df_2024['Pengunjung Mancanegara'] + df_2024['Pengunjung Nusantara']
         
-        # Mengekstrak otomatis data bulanan (Januari - Desember)
-        n_data = [get_num(df_194, f'Wisatawan Nusantara Bulan {b}') for b in bulan_list]
-        m_data = [get_num(df_194, f'Wisatawan Mancanegara Bulan {b}') for b in bulan_list]
+        # Metrik Ekonomi & Infrastruktur
+        belanja_turis = get_112('Rata-Rata Belanja')
+        kamar_bintang = get_194('Jumlah Kamar Hotel Bintang')
+        kamar_non = get_194('Jumlah Kamar Hotel Non Bintang')
+        total_kamar = kamar_bintang + kamar_non
         
-        df_trend = pd.DataFrame({'Bulan': bulan_list, 'Nusantara': n_data, 'Mancanegara': m_data})
-        df_trend['Total'] = df_trend['Nusantara'] + df_trend['Mancanegara']
+        # Kalkulasi Daya Tampung (Kamar x 2 Orang x 30 Hari)
+        kapasitas_maksimal_bulanan = total_kamar * 2 * 30
         
-        total_wisatawan = df_trend['Total'].sum()
-        
-        pokdarwis = get_num(df_194, 'Jumlah Pokdarwis')
-        sdm_tersertifikasi = get_num(df_194, 'tersertifikasi')
+        df_2024['Rasio_Okupansi'] = (df_2024['Total'] / kapasitas_maksimal_bulanan) * 100
+        df_2024['Pendapatan_Miliar'] = (df_2024['Total'] * belanja_turis) / 1000000000
 
-        # --- TABS NAVIGASI ---
-        tab1, tab2, tab3 = st.tabs(["💰 Dampak Ekonomi", "📈 Tren Kedatangan", "🎖️ Kualitas & Tata Kelola"])
+        # TABS ANALISIS KOMPLEKS
+        tab1, tab2 = st.tabs(["🏨 Carrying Capacity (Daya Tampung)", "📈 Economic Multiplier (Dampak Ekonomi)"])
 
-        # TAB 1: DAMPAK EKONOMI
         with tab1:
-            st.subheader("Dampak Ekonomi Makro Sektor Pariwisata")
-            st.markdown("Mengukur kekuatan finansial yang dihasilkan dari pergerakan pariwisata berdasarkan Data Prioritas (112).")
+            st.subheader("Analisis Daya Tampung Akomodasi vs Lonjakan Wisatawan")
+            st.markdown(f"**Total Kapasitas Kamar Yogyakarta:** {total_kamar:,.0f} kamar (Maksimal tampung ~{kapasitas_maksimal_bulanan:,.0f} turis/bulan)")
             
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("PDRB Akomodasi & Makan", f"Rp {pdrb_akomodasi:,.0f} M")
-            col2.metric("Rata-Rata Belanja Turis", f"Rp {belanja_wisatawan:,.0f}")
-            col3.metric("Estimasi Total Pengeluaran", f"Rp {(total_wisatawan * belanja_wisatawan / 1000000000):,.1f} M", "Asumsi Total Turis × Belanja")
-            col4.metric("Length of Stay (LoS)", f"{los_prioritas} Hari")
+            # Deteksi Over-tourism
+            over_tourism = df_2024[df_2024['Rasio_Okupansi'] > 100]
+            if not over_tourism.empty:
+                st.error(f"🚨 KRITIS: Ditemukan {len(over_tourism)} bulan di mana jumlah wisatawan MELEBIHI kapasitas maksimal hotel di Yogyakarta!")
             
-            st.divider()
-            st.info("💡 **Catatan Eksekutif:** Pendapatan pariwisata berbanding lurus dengan *Length of Stay*. Menambah daya tarik wisata malam hari dapat meningkatkan masa tinggal, yang secara eksponensial akan mendongkrak pengeluaran wisatawan di Kota Yogyakarta.")
-
-        # TAB 2: TREN VOLUMETRIK
-        with tab2:
-            st.subheader("Analisis Volume Kunjungan Wisatawan per Bulan")
-            st.markdown(f"Total Wisatawan Tahun Ini (Berdasarkan Data 194): **{total_wisatawan:,.0f} Orang**")
-            
-            fig_trend = go.Figure()
-            fig_trend.add_trace(go.Bar(x=df_trend['Bulan'], y=df_trend['Nusantara'], name="Wisatawan Nusantara", marker_color='#3498db'))
-            fig_trend.add_trace(go.Bar(x=df_trend['Bulan'], y=df_trend['Mancanegara'], name="Wisatawan Mancanegara", marker_color='#e74c3c'))
-            fig_trend.add_trace(go.Scatter(x=df_trend['Bulan'], y=df_trend['Total'], name="Garis Total Kunjungan", mode='lines+markers', line=dict(color='#2c3e50', width=3)))
-            
-            fig_trend.update_layout(barmode='stack', height=500, template="plotly_white", 
-                                    legend=dict(orientation="h", y=1.1, x=0.3))
-            st.plotly_chart(fig_trend, use_container_width=True)
-
-        # TAB 3: KUALITAS & TATA KELOLA
-        with tab3:
-            st.subheader("Indikator Kualitas Layanan Prima & Reformasi Birokrasi")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Daya Tarik Standar Prima", f"{dtw_prima}%")
-            c2.metric("Peningkatan Kompetensi SDM", f"{sdm_meningkat}%")
-            c3.metric("SDM Tersertifikasi SKKNI", f"{sdm_tersertifikasi:,.0f} Orang")
-            c4.metric("Jumlah Pokdarwis Aktif", f"{pokdarwis:,.0f} Kelompok")
-            
-            st.divider()
-            st.markdown("##### Akuntabilitas & Governance Dinas Pariwisata")
-            cg1, cg2 = st.columns(2)
-            with cg1:
-                st.success(f"🏛️ **Nilai Reformasi Birokrasi:** \n\n ### {rb_dinas.strip()}")
-            with cg2:
-                st.success(f"🛡️ **Nilai SAKIP Dinas:** \n\n ### {sakip_dinas.strip()}")
-
-    except Exception as e:
-        st.error(f"Terjadi kesalahan saat memproses data. Log error: {e}")
-
-else:
-    st.info("👈 Silakan upload file '194..._4.xlsx' dan '112.xlsx' di menu sidebar sebelah kiri untuk merender dashboard.")
+            fig_cap = go.Figure()
+            fig_cap.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Total'], name="Total Wisatawan", marker_color='#3498db'))
+            fig_cap.add_hline(y=kapasitas_maksimal_bulanan, line_dash
