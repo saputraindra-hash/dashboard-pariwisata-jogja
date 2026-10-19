@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from sklearn.cluster import KMeans
+from sklearn.linear_model import LinearRegression
 
 # Konfigurasi Halaman
 st.set_page_config(page_title="Dashboard Pariwisata Yogyakarta", layout="wide")
@@ -22,7 +25,6 @@ if file_2024 and file_2025:
         df_2024 = pd.read_excel(file_2024, sheet_name='Sheet1')
         df_2025 = pd.read_excel(file_2025, sheet_name='Sheet1')
 
-        # --- CEK PENGAMAN JIKA FILE TERTUKAR ---
         if 'Pengunjung Nusantara' not in df_2024.columns:
             st.error("⚠️ Sepertinya file tertukar! Pastikan Anda mengunggah 'Data Pengunjung 2024' di kotak PERTAMA.")
         elif 'Nama Data' not in df_2025.columns:
@@ -33,7 +35,6 @@ if file_2024 and file_2025:
             df_2024['Luar Malioboro'] = df_2024['Total Pengunjung'] - df_2024['Malioboro']
             total_wisatawan = df_2024['Total Pengunjung'].sum()
 
-            # Fungsi ekstraksi aman (mencegah eror jika teks tidak ditemukan)
             def get_metric(df, keyword):
                 val = df.loc[df['Nama Data'].str.contains(keyword, case=False, na=False), 'Data 2025']
                 return val.values[0] if not val.empty else 0
@@ -42,6 +43,26 @@ if file_2024 and file_2025:
             jumlah_pokdarwis = get_metric(df_2025, 'Jumlah Pokdarwis')
             kampung_wisata = get_metric(df_2025, 'Kampung Wisata')
 
+            # --- MACHINE LEARNING ALGORITHMS ---
+            # 1. K-Means Clustering (Deteksi Musiman)
+            X_cluster = df_2024[['Total Pengunjung']].values
+            kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+            df_2024['Cluster_ID'] = kmeans.fit_predict(X_cluster)
+            
+            # Mengurutkan klaster dari terkecil ke terbesar
+            cluster_centers = kmeans.cluster_centers_.flatten()
+            sorted_idx = np.argsort(cluster_centers)
+            cluster_map = {sorted_idx[0]: 'Low Season', sorted_idx[1]: 'Normal Season', sorted_idx[2]: 'Peak Season'}
+            color_map = {'Low Season': '#2ecc71', 'Normal Season': '#f1c40f', 'Peak Season': '#e74c3c'}
+            df_2024['Seasonality'] = df_2024['Cluster_ID'].map(cluster_map)
+
+            # 2. Linear Regression (Analisis Tren)
+            X_trend = np.arange(len(df_2024)).reshape(-1, 1)
+            y_trend = df_2024['Total Pengunjung'].values
+            lin_reg = LinearRegression()
+            lin_reg.fit(X_trend, y_trend)
+            df_2024['Trend_Line'] = lin_reg.predict(X_trend)
+
             # --- METRIK UTAMA (KPI) ---
             st.subheader("Ringkasan Eksekutif")
             col1, col2, col3, col4 = st.columns(4)
@@ -49,57 +70,41 @@ if file_2024 and file_2025:
             col2.metric("Pengunjung Malioboro", f"{df_2024['Malioboro'].sum():,.0f}")
             col3.metric("SDM Tersertifikasi", f"{sdm_tersertifikasi:,.0f} Orang")
             col4.metric("Pokdarwis Aktif", f"{jumlah_pokdarwis:,.0f} Kelompok")
-            
             st.divider()
 
-            # --- VISUALISASI PLOTLY ---
-            st.subheader("Visualisasi Data Interaktif")
-            fig = make_subplots(
-                rows=2, cols=2,
-                specs=[[{"type": "xy"}, {"type": "domain"}],
-                       [{"type": "indicator"}, {"type": "indicator"}]],
-                subplot_titles=(
-                    "Tren Kunjungan Wisatawan per Bulan (2024)", 
-                    "Distribusi Beban: Malioboro vs Lainnya", 
-                    "Krisis SDM: Rasio Pekerja Tersertifikasi", 
-                    "Kapasitas Komunitas (Pokdarwis)"
-                ),
-                row_heights=[0.6, 0.4]
-            )
-
-            # Panel 1: Bar & Line Chart
+            # --- VISUALISASI DATA DASAR ---
+            st.subheader("Visualisasi Beban Wisatawan vs Kesiapan Layanan")
+            fig = make_subplots(rows=1, cols=2, specs=[[{"type": "xy"}, {"type": "domain"}]], subplot_titles=("Tren Demografi Pengunjung (2024)", "Keterpusatan Beban Malioboro"))
             fig.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Pengunjung Nusantara'], name="Nusantara", marker_color='#3498db'), row=1, col=1)
             fig.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Pengunjung Mancanegara'], name="Mancanegara", marker_color='#e74c3c'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df_2024['Bulan'], y=df_2024['Total Pengunjung'], name="Total Kunjungan", mode='lines+markers', line=dict(color='black', width=2)), row=1, col=1)
-            fig.update_layout(barmode='stack')
-
-            # Panel 2: Donut Chart
-            fig.add_trace(go.Pie(labels=['Malioboro', 'Destinasi Lainnya'], 
-                                 values=[df_2024['Malioboro'].sum(), df_2024['Luar Malioboro'].sum()],
-                                 hole=0.4, marker_colors=['#f1c40f', '#2ecc71']), row=1, col=2)
-
-            # Panel 3: KPI Indicator SDM
-            fig.add_trace(go.Indicator(
-                mode="number+gauge",
-                value=sdm_tersertifikasi,
-                title={"text": f"SDM Tersertifikasi<br><span style='font-size:0.8em;color:gray'>Melayani {total_wisatawan/1000000:.1f} Juta Turis</span>"},
-                gauge={'axis': {'range': [0, 1000]}, 'bar': {'color': "#e74c3c"}}
-            ), row=2, col=1)
-
-            # Panel 4: KPI Indicator Pokdarwis
-            fig.add_trace(go.Indicator(
-                mode="number+delta",
-                value=jumlah_pokdarwis,
-                title={"text": "Jumlah Pokdarwis Aktif"},
-                delta={'reference': kampung_wisata, 'position': "bottom"},
-                domain={'x': [0, 1], 'y': [0, 1]}
-            ), row=2, col=2)
-
-            fig.update_layout(height=750, template="plotly_white", margin=dict(t=50, b=50, l=50, r=50))
+            fig.add_trace(go.Pie(labels=['Malioboro', 'Destinasi Lainnya'], values=[df_2024['Malioboro'].sum(), df_2024['Luar Malioboro'].sum()], hole=0.4, marker_colors=['#f1c40f', '#2ecc71']), row=1, col=2)
+            fig.update_layout(barmode='stack', height=400, template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
+            st.divider()
+
+            # --- PANEL ALGORITMA ---
+            st.subheader("🤖 Analisis Kecerdasan Buatan (Machine Learning)")
+            col_alg1, col_alg2 = st.columns(2)
+
+            with col_alg1:
+                st.markdown("**1. K-Means Clustering (Segmentasi Musim Otomatis)**")
+                fig_cluster = go.Figure()
+                for season in ['Low Season', 'Normal Season', 'Peak Season']:
+                    df_season = df_2024[df_2024['Seasonality'] == season]
+                    fig_cluster.add_trace(go.Bar(x=df_season['Bulan'], y=df_season['Total Pengunjung'], name=season, marker_color=color_map[season]))
+                fig_cluster.update_layout(height=400, template="plotly_white", barmode='group', legend=dict(orientation="h", y=1.1))
+                st.plotly_chart(fig_cluster, use_container_width=True)
+
+            with col_alg2:
+                st.markdown("**2. Linear Regression (Proyeksi Tren Kunjungan)**")
+                fig_trend = go.Figure()
+                fig_trend.add_trace(go.Scatter(x=df_2024['Bulan'], y=df_2024['Total Pengunjung'], mode='lines+markers', name='Data Aktual', line=dict(color='#3498db', width=2)))
+                fig_trend.add_trace(go.Scatter(x=df_2024['Bulan'], y=df_2024['Trend_Line'], mode='lines', name='Garis Tren (Regresi)', line=dict(color='#e74c3c', dash='dash', width=3)))
+                fig_trend.update_layout(height=400, template="plotly_white", legend=dict(orientation="h", y=1.1))
+                st.plotly_chart(fig_trend, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat memproses data: Pastikan format file Excel sudah benar.")
+        st.error(f"Terjadi kesalahan saat memproses data: Pastikan format file Excel sudah benar. Log: {e}")
 
 else:
-    st.info("👈 Silakan upload file Excel 2024 dan 2025 di menu samping (sidebar) untuk melihat dashboard.")
+    st.info("👈 Silakan upload file Excel 2024 dan 2025 di menu samping (sidebar) untuk melihat dashboard analitik berbasis AI.")
