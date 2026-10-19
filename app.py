@@ -9,8 +9,8 @@ import re
 st.set_page_config(page_title="Ultimate DSS Pariwisata Jogja", layout="wide", initial_sidebar_state="expanded")
 
 # --- HEADER PRESENTASI ---
-st.title("🏛️ Command Center Pariwisata & Ekonomi Kota Yogyakarta")
-st.markdown("*Platform Analitik Eksekutif Berbasis Data Sektoral & Machine Learning (Presentasi Walikota)*")
+st.title("🏛️ Command Center Pariwisata & Tata Kota Yogyakarta")
+st.markdown("*Platform Analitik Eksekutif: Ekonomi, SDM, dan Prediksi Kemacetan Lalu Lintas*")
 st.divider()
 
 st.sidebar.header("📁 Upload Dataset (Wajib 3 File)")
@@ -42,52 +42,49 @@ if file_2024 and file_194 and file_112:
         df_2024['Luar Malioboro'] = df_2024['Total'] - df_2024['Malioboro']
         total_wisatawan_2024 = df_2024['Total'].sum()
         
-        # Metrik Ekonomi & SDM
         belanja_turis = get_112('Rata-Rata Belanja')
         los_aktual = get_112('Length of Stay')
-        pdrb_pariwisata = get_112('Kontribusi sektor pariwisata terhadap PDRB')
         
-        kamar_bintang = get_194('Jumlah Kamar Hotel Bintang')
-        kamar_non = get_194('Jumlah Kamar Hotel Non Bintang')
-        total_kamar = kamar_bintang + kamar_non
-        kapasitas_kota_bulanan = total_kamar * 2 * 30  # Asumsi 1 kamar 2 orang, 30 hari
+        total_kamar = get_194('Jumlah Kamar Hotel Bintang') + get_194('Jumlah Kamar Hotel Non Bintang')
+        kapasitas_kota_bulanan = total_kamar * 2 * 30 
         
         sdm_sertifikasi = get_194('tersertifikasi')
         pokdarwis = get_194('Jumlah Pokdarwis')
         kampung_wisata = get_194('Kampung Wisata')
 
+        # --- PEMODELAN LALU LINTAS (TRAFFIC MODEL) ---
+        # Asumsi Proporsi Kendaraan: Bus (30% turis, kapasitas 40), Mobil (50%, kap. 4), Motor (20%, kap. 2)
+        df_2024['Est_Bus'] = (df_2024['Total'] * 0.30) / 40
+        df_2024['Est_Mobil'] = (df_2024['Total'] * 0.50) / 4
+        df_2024['Est_Motor'] = (df_2024['Total'] * 0.20) / 2
+        df_2024['Total_Kendaraan'] = df_2024['Est_Bus'] + df_2024['Est_Mobil'] + df_2024['Est_Motor']
+        
+        # Batas Kritis Daya Tampung Kendaraan Jalan Arteri Kota per Bulan (Simulasi: 150,000 Kendaraan/Bulan)
+        kapasitas_jalan_maksimal = 150000 
+        df_2024['Indeks_Kemacetan'] = (df_2024['Total_Kendaraan'] / kapasitas_jalan_maksimal) * 100
+
         # --- TABS PRESENTASI ---
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🎯 1. Executive Summary", 
-            "📈 2. Predictive Forecasting", 
-            "💰 3. Economic ROI Simulation", 
-            "🚨 4. Carrying Capacity & HR"
+            "📈 2. Tourist Forecasting", 
+            "💰 3. Economic Simulation", 
+            "🚨 4. Infrastructure EWS",
+            "🚦 5. Traffic Prediction (Baru)"
         ])
 
-        # ==========================================
-        # TAB 1: EXECUTIVE SUMMARY (STORYTELLING)
-        # ==========================================
+        # TAB 1: EXECUTIVE SUMMARY
         with tab1:
             st.subheader("Ringkasan Kinerja Makro (Tahun Berjalan)")
-            
-            # Kartu Metrik Utama
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Volume Wisatawan", f"{total_wisatawan_2024/1e6:.2f} Juta", "Data 2024")
-            c2.metric("Estimasi Perputaran Uang", f"Rp {(total_wisatawan_2024 * belanja_turis)/1e12:.2f} Triliun", f"Belanja: Rp {belanja_turis/1e6:.1f} Jt/Orang")
-            c3.metric("Length of Stay (LoS)", f"{los_aktual} Hari", "Indikator Prioritas")
-            c4.metric("Kapasitas Akomodasi", f"{total_kamar:,.0f} Kamar", "Bintang & Non-Bintang")
+            c1.metric("Volume Wisatawan", f"{total_wisatawan_2024/1e6:.2f} Juta")
+            c2.metric("Estimasi Perputaran Uang", f"Rp {(total_wisatawan_2024 * belanja_turis)/1e12:.2f} T")
+            c3.metric("Length of Stay (LoS)", f"{los_aktual} Hari")
+            c4.metric("Total Kendaraan Wisata", f"{df_2024['Total_Kendaraan'].sum():,.0f} Unit")
             
             st.divider()
-            
-            # Auto-Generated Insights
-            st.markdown("### 🤖 *Auto-Generated Strategic Insights*")
-            st.info(f"**1. Konsentrasi Ekstrem:** Dari {total_wisatawan_2024/1e6:.1f} juta wisatawan, sebesar **{(df_2024['Malioboro'].sum()/total_wisatawan_2024)*100:.1f}%** menumpuk di kawasan Malioboro. Dibutuhkan intervensi segera ke {kampung_wisata:,.0f} Kampung Wisata lainnya.")
-            st.info(f"**2. Ketimpangan SDM:** Kota ini menerima {total_wisatawan_2024/1e6:.1f} juta tamu, namun hanya didukung oleh **{sdm_sertifikasi:,.0f} pekerja pariwisata tersertifikasi**. Rasio layanan saat ini berada di tingkat bahaya (1 SDM melayani ribuan turis).")
-            
-            # Grafik Distribusi Spasial (Bubble Chart)
             st.markdown("#### Pemetaan Beban Spasial: Malioboro vs Kampung Wisata")
             fig_spatial = go.Figure(data=[go.Scatter(
-                x=['Kawasan Malioboro', 'Luar Malioboro (Kampung Wisata dll)'],
+                x=['Kawasan Malioboro', 'Destinasi Lainnya (Kampung Wisata)'],
                 y=[df_2024['Malioboro'].sum(), df_2024['Luar Malioboro'].sum()],
                 mode='markers+text',
                 marker=dict(size=[df_2024['Malioboro'].sum()/100000, df_2024['Luar Malioboro'].sum()/100000], color=['#e74c3c', '#2ecc71']),
@@ -97,92 +94,78 @@ if file_2024 and file_194 and file_112:
             fig_spatial.update_layout(height=400, template="plotly_white", yaxis=dict(range=[0, df_2024['Total'].max() * 1.5]))
             st.plotly_chart(fig_spatial, use_container_width=True)
 
-
-        # ==========================================
-        # TAB 2: PREDICTIVE FORECASTING (ML)
-        # ==========================================
+        # TAB 2: TOURIST FORECASTING
         with tab2:
-            st.subheader("Machine Learning: Prediksi Pertumbuhan Masa Depan")
-            st.markdown("Menggunakan model *Linear Regression* untuk memproyeksikan lintasan volume wisatawan di tahun berikutnya berdasarkan data historis.")
-            
+            st.subheader("Machine Learning: Prediksi Kedatangan Wisatawan")
             X = np.arange(len(df_2024)).reshape(-1, 1)
             y = df_2024['Total'].values
             model = LinearRegression().fit(X, y)
-            
-            # Proyeksi 6 bulan ke depan
             X_future = np.arange(len(df_2024), len(df_2024)+6).reshape(-1, 1)
             y_future = model.predict(X_future)
             
             fig_pred = go.Figure()
-            fig_pred.add_trace(go.Scatter(x=df_2024['Bulan'], y=y, mode='lines+markers', name='Data Historis (Aktual)', line=dict(color='#3498db', width=3)))
-            
-            bulan_depan = ['Bln+1', 'Bln+2', 'Bln+3', 'Bln+4', 'Bln+5', 'Bln+6']
-            fig_pred.add_trace(go.Scatter(x=bulan_depan, y=y_future, mode='lines+markers', name='AI Forecasting (Proyeksi)', line=dict(color='#e67e22', dash='dot', width=3)))
-            
-            fig_pred.update_layout(height=450, template="plotly_white", title="Trajektori Kunjungan Wisatawan")
+            fig_pred.add_trace(go.Scatter(x=df_2024['Bulan'], y=y, mode='lines+markers', name='Data Aktual', line=dict(color='#3498db', width=3)))
+            fig_pred.add_trace(go.Scatter(x=['Bln+1', 'Bln+2', 'Bln+3', 'Bln+4', 'Bln+5', 'Bln+6'], y=y_future, mode='lines+markers', name='Proyeksi AI', line=dict(color='#e67e22', dash='dot', width=3)))
+            fig_pred.update_layout(height=450, template="plotly_white")
             st.plotly_chart(fig_pred, use_container_width=True)
-            
-            st.warning("💡 **Pernyataan Eksekutif:** Tren proyeksi menunjukkan peningkatan. Tanpa penambahan infrastruktur baru, lonjakan di tahun depan akan memicu kemacetan total (*gridlock*) di kuartal ketiga.")
 
-
-        # ==========================================
-        # TAB 3: ECONOMIC ROI SIMULATION
-        # ==========================================
+        # TAB 3: ECONOMIC SIMULATION
         with tab3:
-            st.subheader("Simulasi Kebijakan: Economic Multiplier Effect")
-            st.markdown("Sebagai Walikota, Anda dapat menetapkan target kenaikan masa tinggal (*Length of Stay*) dan melihat dampaknya terhadap ekonomi daerah secara *real-time*.")
-            
+            st.subheader("Simulasi Kebijakan: Kenaikan Masa Tinggal (LoS)")
             st.sidebar.divider()
-            st.sidebar.markdown("### 🎛️ Panel Kebijakan (Tab 3)")
-            simulasi_los = st.sidebar.slider("Target Kenaikan Length of Stay (Hari)", min_value=0.0, max_value=2.0, value=0.5, step=0.1)
+            st.sidebar.markdown("### 🎛️ Panel Ekonomi (Tab 3)")
+            simulasi_los = st.sidebar.slider("Target Tambahan LoS (Hari)", min_value=0.0, max_value=2.0, value=0.5, step=0.1)
             
-            # Asumsi ekonomi dasar: Jika LoS naik, belanja otomatis naik proporsional
-            persentase_kenaikan_los = simulasi_los / (los_aktual if los_aktual > 0 else 1)
-            tambahan_belanja_per_turis = belanja_turis * persentase_kenaikan_los
+            tambahan_belanja = belanja_turis * (simulasi_los / (los_aktual if los_aktual > 0 else 1))
+            tambahan_pdrb = (total_wisatawan_2024 * tambahan_belanja) / 1e12
             
-            pendapatan_dasar_triliun = (total_wisatawan_2024 * belanja_turis) / 1e12
-            tambahan_pendapatan_triliun = (total_wisatawan_2024 * tambahan_belanja_per_turis) / 1e12
-            
-            col_eco1, col_eco2, col_eco3 = st.columns(3)
-            col_eco1.metric("LoS Baru (Target)", f"{los_aktual + simulasi_los:.2f} Hari", f"+ {simulasi_los} Hari")
-            col_eco2.metric("Proyeksi Belanja Turis", f"Rp {(belanja_turis + tambahan_belanja_per_turis):,.0f}", f"+ Rp {tambahan_belanja_per_turis:,.0f}")
-            col_eco3.metric("TAMBAHAN PDRB (Uang Beredar)", f"+ Rp {tambahan_pendapatan_triliun:.2f} Triliun", "Dampak Langsung ke Ekonomi Kota")
-            
-            st.divider()
-            fig_roi = go.Figure(data=[
-                go.Bar(name='Pendapatan Saat Ini', x=['Proyeksi Pendapatan Daerah'], y=[pendapatan_dasar_triliun], marker_color='#34495e'),
-                go.Bar(name='Tambahan Hasil Kebijakan (ROI)', x=['Proyeksi Pendapatan Daerah'], y=[tambahan_pendapatan_triliun], marker_color='#2ecc71')
-            ])
-            fig_roi.update_layout(barmode='stack', height=400, template="plotly_white", title="Visualisasi Tumpukan (Stack) Kekuatan Ekonomi Triliunan")
-            st.plotly_chart(fig_roi, use_container_width=True)
+            c_eco1, c_eco2, c_eco3 = st.columns(3)
+            c_eco1.metric("LoS Baru (Target)", f"{los_aktual + simulasi_los:.2f} Hari", f"+ {simulasi_los} Hari")
+            c_eco2.metric("Proyeksi Belanja", f"Rp {(belanja_turis + tambahan_belanja):,.0f}", f"+ Rp {tambahan_belanja:,.0f}")
+            c_eco3.metric("Potensi Tambahan Ekonomi", f"+ Rp {tambahan_pdrb:.2f} Triliun")
 
-
-        # ==========================================
-        # TAB 4: CARRYING CAPACITY & HR EWS
-        # ==========================================
+        # TAB 4: INFRASTRUCTURE EWS
         with tab4:
-            st.subheader("Sistem Peringatan Dini (EWS): Daya Tampung vs Rasio SDM")
-            
-            df_2024['Status_Kapasitas'] = np.where(df_2024['Total'] > kapasitas_kota_bulanan, 'OVER CAPACITY', 'Aman')
-            
-            st.markdown(f"**Batas Kritis Infrastruktur Akomodasi:** {kapasitas_kota_bulanan:,.0f} Pengunjung / Bulan")
-            
+            st.subheader("Peringatan Dini: Kapasitas Hotel vs Kedatangan")
             fig_cap = go.Figure()
             colors = ['#e74c3c' if val > kapasitas_kota_bulanan else '#3498db' for val in df_2024['Total']]
-            fig_cap.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Total'], marker_color=colors, name="Volume Wisatawan"))
-            fig_cap.add_hline(y=kapasitas_kota_bulanan, line_dash="dash", line_color="black", line_width=3, annotation_text="Kapasitas Maksimal Hotel")
-            fig_cap.update_layout(height=400, template="plotly_white", title="Bulan-bulan Merah (Over-tourism)")
+            fig_cap.add_trace(go.Bar(x=df_2024['Bulan'], y=df_2024['Total'], marker_color=colors))
+            fig_cap.add_hline(y=kapasitas_kota_bulanan, line_dash="dash", line_color="black", annotation_text="Kapasitas Maksimal Hotel")
+            fig_cap.update_layout(height=400, template="plotly_white")
             st.plotly_chart(fig_cap, use_container_width=True)
+
+        # TAB 5: TRAFFIC PREDICTION (BARU)
+        with tab5:
+            st.subheader("🚦 Analisis & Prediksi Kemacetan Lalu Lintas (Traffic EWS)")
+            st.markdown("Mengonversi volume wisatawan menjadi beban kendaraan, lalu mengukur **Indeks Kemacetan** jalan utama menuju Malioboro.")
             
-            st.divider()
-            st.markdown("### ⚠️ Evaluasi Krisis SDM (Human Resource Crisis)")
-            beban_per_sdm = total_wisatawan_2024 / (sdm_sertifikasi if sdm_sertifikasi > 0 else 1)
+            # Machine Learning untuk memprediksi kemacetan masa depan
+            X_traffic = np.arange(len(df_2024)).reshape(-1, 1)
+            y_traffic = df_2024['Indeks_Kemacetan'].values
+            model_traffic = LinearRegression().fit(X_traffic, y_traffic)
+            y_traffic_future = model_traffic.predict(np.arange(len(df_2024), len(df_2024)+6).reshape(-1, 1))
+
+            col_t1, col_t2 = st.columns(2)
+            col_t1.metric("Bulan Paling Macet", df_2024.loc[df_2024['Indeks_Kemacetan'].idxmax(), 'Bulan'], f"{df_2024['Indeks_Kemacetan'].max():.1f}% Kapasitas")
+            col_t2.metric("Rata-rata Kemacetan Tahunan", f"{df_2024['Indeks_Kemacetan'].mean():.1f}%", "Status: Perlu Rekayasa Lalu Lintas")
+
+            # Grafik Kemacetan
+            fig_traffic = go.Figure()
             
-            c_hr1, c_hr2 = st.columns(2)
-            c_hr1.metric("Rasio SDM Tersertifikasi terhadap Turis", f"1 SDM : {beban_per_sdm:,.0f} Turis")
-            c_hr2.metric("Rasio Beban Pokdarwis (Kelompok Sadar Wisata)", f"{total_wisatawan_2024/pokdarwis:,.0f} Turis / Pokdarwis")
+            # Zona Warna Kemacetan
+            fig_traffic.add_hrect(y0=0, y1=60, fillcolor="#2ecc71", opacity=0.2, line_width=0, annotation_text="Lancar")
+            fig_traffic.add_hrect(y0=60, y1=90, fillcolor="#f1c40f", opacity=0.2, line_width=0, annotation_text="Padat Merayap")
+            fig_traffic.add_hrect(y0=90, y1=150, fillcolor="#e74c3c", opacity=0.2, line_width=0, annotation_text="Gridlock (Lumpuh)")
+
+            fig_traffic.add_trace(go.Scatter(x=df_2024['Bulan'], y=df_2024['Indeks_Kemacetan'], mode='lines+markers', name='Indeks Aktual (%)', line=dict(color='black', width=3)))
+            fig_traffic.add_trace(go.Scatter(x=['Bln+1', 'Bln+2', 'Bln+3', 'Bln+4', 'Bln+5', 'Bln+6'], y=y_traffic_future, mode='lines+markers', name='Prediksi 6 Bln Ke Depan', line=dict(color='red', dash='dot', width=3)))
             
-            st.error("Rekomendasi Kebijakan (Policy Brief): Segera cairkan APBD untuk program sertifikasi SKKNI massal. Kualitas layanan ('Service Excellence') tidak akan tercapai jika 1 tenaga kerja harus melayani puluhan ribu turis setahun.")
+            fig_traffic.add_hline(y=100, line_dash="solid", line_color="darkred", line_width=2, annotation_text="Batas Maksimal Jalan (100%)")
+            fig_traffic.update_layout(height=450, template="plotly_white", yaxis_title="Indeks Kemacetan (%)")
+            
+            st.plotly_chart(fig_traffic, use_container_width=True)
+            
+            st.error("🚨 **Strategic Briefing untuk Walikota:** Berdasarkan pemodelan di atas, ketika indeks menyentuh zona merah (seperti Desember/Juni), manajemen lalu lintas pasif tidak akan cukup. Diperlukan pembangunan *Park & Ride* (Kantung Parkir) di pinggiran kota, dan pelarangan Bus Besar masuk ke ring 1 Malioboro.")
 
     except Exception as e:
         st.error(f"Terjadi kesalahan data. Pastikan file sesuai. Log Error: {e}")
