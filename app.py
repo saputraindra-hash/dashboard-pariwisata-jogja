@@ -247,31 +247,39 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             
         wisata_sample['Jarak_Jalan_Meter'] = hasil_evaluasi
         
-        # 3. FILTER & VISUALISASI
-        blank_spots = wisata_sample[wisata_sample['Jarak_Jalan_Meter'] > batas_meter]
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Simpul Jalan (Nodes)", len(G.nodes))
-        c2.metric("Titik Wisata Dievaluasi", len(wisata_sample))
-        c3.metric(f"🚨 Blank Spot Jalan (> {radius_aman_km} Km)", len(blank_spots), delta_color="inverse")
-
-        m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
-
-        # Visualisasi Titik Rawan
-        for idx, row in wisata_sample.iterrows():
-            jarak_km = row['Jarak_Jalan_Meter'] / 1000
-            if jarak_km == float('inf'): continue # Terisolasi / tidak ada jalan
+       # 3. FILTER & VISUALISASI
+        if not wisata_sample.empty and not faskes_gdf.empty:
+            blank_spots = wisata_sample[wisata_sample['Jarak_Jalan_Meter'] > batas_meter]
             
-            warna = "red" if jarak_km > radius_aman_km else "blue"
-            radius_lingkaran = 8 if jarak_km > radius_aman_km else 4
-            status_teks = "RAWAN" if jarak_km > radius_aman_km else "AMAN"
-            
-            nama_dtw = row.get('nama', 'Destinasi Wisata')
-            tooltip = f"<b>{nama_dtw}</b><br>Rute Jalan ke Faskes: {jarak_km:.2f} Km<br>Status: {status_teks}"
-            
-            folium.CircleMarker(
-                [row.geometry.y, row.geometry.x], radius=radius_lingkaran, color=warna, fill=True, fill_opacity=0.8, tooltip=tooltip
-            ).add_to(m_master)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Simpul Jalan (Nodes)", len(G.nodes))
+            c2.metric("Titik Wisata Dievaluasi", len(wisata_sample))
+            c3.metric(f"🚨 Blank Spot Jalan (> {radius_aman_km} Km)", len(blank_spots), delta_color="inverse")
 
-        st_folium(m_master, width=900, height=550, returned_objects=[])
+            m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
+
+            # Visualisasi Titik Rawan
+            for idx, row in wisata_sample.iterrows():
+                jarak_km = row['Jarak_Jalan_Meter'] / 1000
+                if jarak_km == float('inf'): continue # Terisolasi / tidak ada jalan terhubung
+                
+                warna = "red" if jarak_km > radius_aman_km else "blue"
+                radius_lingkaran = 8 if jarak_km > radius_aman_km else 4
+                status_teks = "RAWAN" if jarak_km > radius_aman_km else "AMAN"
+                
+                nama_dtw = row.get('nama', 'Destinasi Wisata')
+                tooltip = f"<b>{nama_dtw}</b><br>Rute Jalan ke Faskes: {jarak_km:.2f} Km<br>Status: {status_teks}"
+                
+                folium.CircleMarker(
+                    [row.geometry.y, row.geometry.x], 
+                    radius=radius_lingkaran, 
+                    color=warna, 
+                    fill=True, 
+                    fill_opacity=0.8, 
+                    tooltip=tooltip
+                ).add_to(m_master)
+
+            st_folium(m_master, width=900, height=550, returned_objects=[])
+            
+        else:
             st.error("Gagal menarik data dari server Geoportal untuk menjalankan analisis.")
