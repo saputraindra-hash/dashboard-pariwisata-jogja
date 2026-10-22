@@ -226,11 +226,20 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 warna = "red" if jarak_km > 5 else "blue"
                 radius = 8 if jarak_km > 5 else 4
                 
-                # Ekstrak nama (mencoba membaca kolom nama dari atribut API acak)
-                nama_dtw = row.iloc[0] if len(row) > 0 else "Destinasi"
+                # Ekstrak nama menggunakan fallback yang aman
+                nama_dtw = row.get('nama', 'Destinasi Wisata')
                 
                 tooltip = f"<b>{nama_dtw}</b><br>Jarak ke Faskes: {jarak_km:.2f} Km<br>Status: {'RAWAN' if jarak_km > 5 else 'AMAN'}"
-                folium.CircleMarker([row['Lat'], row['Lon']], radius=radius, color=warna, fill=True, fill_opacity=0.8, tooltip=tooltip).add_to(layer_wisata)
+                
+                # PERUBAHAN: Gunakan row.geometry.y dan x alih-alih row['Lat']
+                folium.CircleMarker(
+                    [row.geometry.y, row.geometry.x], 
+                    radius=radius, 
+                    color=warna, 
+                    fill=True, 
+                    fill_opacity=0.8, 
+                    tooltip=tooltip
+                ).add_to(layer_wisata)
             layer_wisata.add_to(m_master)
 
             folium.LayerControl().add_to(m_master)
