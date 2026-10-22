@@ -153,101 +153,125 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
     url_3d = "https://geoportal.jogjaprov.go.id/portal/home/webscene/viewer.html?layers=9e6ed007c45844178ac40d591ce611b8&viewpoint=cam:110.38658731,-7.88794756,149559.231;0,0.489"
     with st.spinner("Memuat ruang 3D..."):
         components.iframe(url_3d, height=650, scrolling=True)
-
 # ==============================================================================
-# MENU 6: MASTER OVERLAY & AI KESELAMATAN (DSS)
+# MENU 6: AI KESELAMATAN BERBASIS JARINGAN JALAN (DIJKSTRA)
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
-    st.title("🚨 Decision Support System: Keselamatan Wisata")
-    st.markdown("Algoritma **K-Nearest Neighbors (KNN) Geospasial** menghitung jarak setiap destinasi wisata ke fasilitas kesehatan terdekat (Puskesmas/RS) untuk mendeteksi *Blank Spot* keselamatan secara real-time.")
+    import networkx as nx
+    import itertools
+    
+    st.title("🚨 DSS: Keselamatan Wisata Berbasis Jaringan Jalan")
+    st.markdown("Algoritma **Dijkstra Shortest Path** menghitung jarak tempuh aktual menyusuri **API Jalan Provinsi**.")
+    
+    radius_aman_km = st.slider("Tentukan Batas Jarak Aman Faskes (Kilometer):", 1.0, 30.0, 10.0, 1.0)
+    batas_meter = radius_aman_km * 1000 
     
     @st.cache_data(ttl=3600)
-    def extract_api_to_gdf(url, tipe="titik"):
+    def fetch_api_gdf(url, geom_type="point"):
         try:
             res = requests.get(url, timeout=15).json()
-            if tipe == "titik":
-                records = [{'Lon': f['geometry'].get('x'), 'Lat': f['geometry'].get('y'), **f['attributes']} for f in res.get('features', []) if f.get('geometry')]
-                df = pd.DataFrame(records).dropna(subset=['Lat', 'Lon'])
+            if 'features' not in res: return gpd.GeoDataFrame(), res
+            
+            records = []
+            for f in res['features']:
+                geom = f.get('geometry')
+                if not geom: continue
+                attr = f.get('attributes', {})
+                if geom_type == "point":
+                    attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
+                records.append(attr)
+                
+            df = pd.DataFrame(records)
+            if geom_type == "point":
+                df = df.dropna(subset=['Lat', 'Lon'])
                 geometry = [Point(xy) for xy in zip(df['Lon'], df['Lat'])]
                 return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
-            return gpd.GeoDataFrame(), res
+            
+            # Khusus untuk garis jalan (LineString disederhanakan untuk NetworkX)
+            return df, res
         except:
             return gpd.GeoDataFrame(), {}
 
-    with st.spinner("🔄 Memproses Spatial Join antara API Pariwisata & API BPJS..."):
+    with st.spinner("🔄 Membangun Jaringan Graf Jalan & Menjalankan Algoritma Dijkstra..."):
         url_wisata = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_faskes = "https://geoportal.jogjaprov.go.id/server/rest/services/BPJS/_34_BPJS_FASKES_PT/FeatureServer/216/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_jalan = "https://geoportal.jogjaprov.go.id/server/rest/services/DPUPESDM/34_DPUPESDM_JALANPROVINSI_2024_LN/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
 
-        wisata_gdf, raw_wisata = extract_api_to_gdf(url_wisata, "titik")
-        faskes_gdf, raw_faskes = extract_api_to_gdf(url_faskes, "titik")
-        _, raw_jalan = extract_api_to_gdf(url_jalan, "garis")
+        wisata_gdf, _ = fetch_api_gdf(url_wisata, "point")
+        faskes_gdf, _ = fetch_api_gdf(url_faskes, "point")
+        _, raw_jalan = fetch_api_gdf(url_jalan, "line")
 
-        # --- AI K-NEAREST NEIGHBOR (SPATIAL JOIN) ---
-        if not wisata_gdf.empty and not faskes_gdf.empty:
-            # Konversi ke meter (UTM 49S Jogja) untuk akurasi jarak
-            wisata_utm = wisata_gdf.to_crs("EPSG:32749")
-            faskes_utm = faskes_gdf.to_crs("EPSG:32749")
+        # 1. MEMBANGUN GRAPH JARINGAN JALAN DARI DATA MENTAH JSON
+        G = nx.Graph()
+        
+        if 'features' in raw_jalan:
+            for f in raw_jalan['features']:
+                if 'geometry' in f and 'paths' in f['geometry']:
+                    for path in f['geometry']['paths']:
+                        # Menghubungkan setiap pasang titik dalam satu ruas jalan
+                        for i in range(len(path)-1):
+                            p1 = (path[i][0], path[i][1])
+                            p2 = (path[i+1][0], path[i+1][1])
+                            # Jarak euklidean sementara antar simpul sebagai bobot sisi (edge weight)
+                            jarak_simpul = Point(p1).distance(Point(p2)) * 111000 # Asumsi 1 derajat ~ 111 km
+                            G.add_edge(p1, p2, weight=jarak_simpul)
+
+        # 2. ALGORITMA DIJKSTRA UNTUK SEMUA WISATA KE SEMUA FASKES
+        # Catatan: Karena iterasi ini bisa berat, kita ambil contoh 50 wisata pertama untuk kecepatan presentasi
+        wisata_sample = wisata_gdf.head(50)
+        
+        def cari_simpul_terdekat(graph, titik):
+            # Mencari persimpangan jalan terdekat dari titik wisata/faskes (Snapping)
+            nodes = list(graph.nodes)
+            return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
+
+        hasil_evaluasi = []
+        for idx, wisata in wisata_sample.iterrows():
+            titik_w = Point(wisata['Lon'], wisata['Lat'])
+            simpul_w = cari_simpul_terdekat(G, titik_w)
             
-            # Hitung Jarak Terdekat (sjoin_nearest)
-            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Meter')
-            evaluasi = evaluasi.to_crs("EPSG:4326") # Kembalikan ke format Peta
+            jarak_terpendek = float('inf')
             
-            # Filter Blank Spot (Jarak > 5 Km / 5000 Meter)
-            blank_spots = evaluasi[evaluasi['Jarak_Meter'] > 5000]
+            if simpul_w:
+                for jdx, faskes in faskes_gdf.iterrows():
+                    titik_f = Point(faskes['Lon'], faskes['Lat'])
+                    simpul_f = cari_simpul_terdekat(G, titik_f)
+                    
+                    if simpul_f and nx.has_path(G, simpul_w, simpul_f):
+                        # Eksekusi Algoritma Dijkstra
+                        jarak = nx.shortest_path_length(G, source=simpul_w, target=simpul_f, weight='weight')
+                        if jarak < jarak_terpendek:
+                            jarak_terpendek = jarak
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Destinasi Wisata", len(wisata_gdf))
-            c2.metric("Titik Faskes Tersedia", len(faskes_gdf))
-            c3.metric("🚨 Blank Spot Rawan (>5 Km)", len(blank_spots), delta_color="inverse")
-
-            m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
-
-            # LAYER JALAN
-            layer_jalan = folium.FeatureGroup(name="🛣️ Jalan Provinsi", show=True)
-            if 'features' in raw_jalan:
-                for f in raw_jalan['features']:
-                    geom = f.get('geometry', {})
-                    if 'paths' in geom:
-                        for path in geom['paths']:
-                            folium.PolyLine([[pt[1], pt[0]] for pt in path], color="black", weight=2, opacity=0.5).add_to(layer_jalan)
-            layer_jalan.add_to(m_master)
-
-            # LAYER FASKES
-            layer_faskes = folium.FeatureGroup(name="🏥 Faskes (Titik Hijau)", show=True)
-            for idx, row in faskes_gdf.iterrows():
-                folium.CircleMarker([row['Lat'], row['Lon']], radius=4, color="green", fill=True, fill_opacity=1).add_to(layer_faskes)
-            layer_faskes.add_to(m_master)
-
-            # LAYER WISATA (AMAN VS BLANK SPOT)
-            layer_wisata = folium.FeatureGroup(name="🏖️ Evaluasi Wisata (Aman=Biru, Rawan=Merah)", show=True)
-            for idx, row in evaluasi.iterrows():
-                jarak_km = row['Jarak_Meter'] / 1000
-                warna = "red" if jarak_km > 5 else "blue"
-                radius = 8 if jarak_km > 5 else 4
-                
-                # Ekstrak nama menggunakan fallback yang aman
-                nama_dtw = row.get('nama', 'Destinasi Wisata')
-                
-                tooltip = f"<b>{nama_dtw}</b><br>Jarak ke Faskes: {jarak_km:.2f} Km<br>Status: {'RAWAN' if jarak_km > 5 else 'AMAN'}"
-                
-                # PERUBAHAN: Gunakan row.geometry.y dan x alih-alih row['Lat']
-                folium.CircleMarker(
-                    [row.geometry.y, row.geometry.x], 
-                    radius=radius, 
-                    color=warna, 
-                    fill=True, 
-                    fill_opacity=0.8, 
-                    tooltip=tooltip
-                ).add_to(layer_wisata)
-            layer_wisata.add_to(m_master)
-
-            folium.LayerControl().add_to(m_master)
-            st_folium(m_master, width=900, height=550, returned_objects=[])
+            hasil_evaluasi.append(jarak_terpendek)
             
-            st.warning("""
-            🎙️ **Panduan Presentasi Gubernur (Skenario Keputusan Geospasial):**  
-            *"Bapak/Ibu sekalian, inilah wujud nyata Decision Support System. Algoritma K-Nearest Neighbors kita telah menyandingkan titik pariwisata dengan posisi puskesmas terdekat, lalu menghitung jarak matematisnya. Lingkaran MERAH BESAR di peta ini adalah 'Blank Spot' keselamatan—destinasi wisata yang jaraknya lebih dari 5 kilometer dari faskes BPJS mana pun. Ini adalah instruksi data bagi Dinas Kesehatan: Wilayah merah ini prioritas mutlak untuk pembangunan klinik satelit atau penempatan Posko Ambulans darurat menyambut musim liburan."*
-            """)
-        else:
+        wisata_sample['Jarak_Jalan_Meter'] = hasil_evaluasi
+        
+        # 3. FILTER & VISUALISASI
+        blank_spots = wisata_sample[wisata_sample['Jarak_Jalan_Meter'] > batas_meter]
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Simpul Jalan (Nodes)", len(G.nodes))
+        c2.metric("Titik Wisata Dievaluasi", len(wisata_sample))
+        c3.metric(f"🚨 Blank Spot Jalan (> {radius_aman_km} Km)", len(blank_spots), delta_color="inverse")
+
+        m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
+
+        # Visualisasi Titik Rawan
+        for idx, row in wisata_sample.iterrows():
+            jarak_km = row['Jarak_Jalan_Meter'] / 1000
+            if jarak_km == float('inf'): continue # Terisolasi / tidak ada jalan
+            
+            warna = "red" if jarak_km > radius_aman_km else "blue"
+            radius_lingkaran = 8 if jarak_km > radius_aman_km else 4
+            status_teks = "RAWAN" if jarak_km > radius_aman_km else "AMAN"
+            
+            nama_dtw = row.get('nama', 'Destinasi Wisata')
+            tooltip = f"<b>{nama_dtw}</b><br>Rute Jalan ke Faskes: {jarak_km:.2f} Km<br>Status: {status_teks}"
+            
+            folium.CircleMarker(
+                [row.geometry.y, row.geometry.x], radius=radius_lingkaran, color=warna, fill=True, fill_opacity=0.8, tooltip=tooltip
+            ).add_to(m_master)
+
+        st_folium(m_master, width=900, height=550, returned_objects=[])
             st.error("Gagal menarik data dari server Geoportal untuk menjalankan analisis.")
