@@ -6,7 +6,7 @@ import plotly.express as px
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 import folium
-import streamlit.components.v1 as components
+from streamlit_folium import st_folium
 import os
 
 st.set_page_config(page_title="Command Center Gubernur DIY", layout="wide", initial_sidebar_state="expanded")
@@ -56,7 +56,6 @@ if menu == "1. Ketimpangan & Kemiskinan (Sosial)":
     fig_soc.update_layout(template="plotly_white", height=450)
     st.plotly_chart(fig_soc, use_container_width=True)
     
-    # Skrip Presentasi Tertanam
     st.info("""
     🎙️ **Panduan Presentasi Gubernur (Skenario Bantuan Sosial):**  
     *"Bapak/Ibu, grafik kuadran ini menggunakan AI untuk mengelompokkan wilayah. Kapanewon yang berada di titik merah besar (Prioritas 1) adalah wilayah dengan tingkat kemiskinan dan pengangguran ekstrem. Kami merekomendasikan intervensi APBD berupa padat karya dan Bansos difokuskan secara eksklusif ke wilayah merah ini agar Gini Ratio provinsi bisa turun signifikan tahun depan."*
@@ -97,7 +96,6 @@ elif menu == "2. Tata Ruang & Pangan (Ekologi)":
     fig_pangan.update_layout(height=450, template="plotly_white", title="Proyeksi Persilangan Krisis Pangan DIY (2015-2035)")
     st.plotly_chart(fig_pangan, use_container_width=True)
     
-    # Skrip Presentasi Tertanam
     st.info("""
     🎙️ **Panduan Presentasi Gubernur (Skenario Ekologi & Pangan):**  
     *(Silakan geser slider Moratorium di kiri sambil membacakan ini)*  
@@ -105,7 +103,7 @@ elif menu == "2. Tata Ruang & Pangan (Ekologi)":
     """)
 
 # ==============================================================================
-# MENU 3: AGLOMERASI & TRANSPORTASI (FOLIUM MAP)
+# MENU 3: AGLOMERASI & TRANSPORTASI (STREAMLIT-FOLIUM)
 # ==============================================================================
 elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     st.title("🚦 Manajemen Transportasi Aglomerasi Yogyakarta")
@@ -128,20 +126,16 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     
     st.markdown("### 🗺️ Peta Interaktif V/C Ratio Jalan Arteri DIY")
     
-    # Pembuatan Peta Spasial menggunakan Folium
-    # Kordinat pusat: Tugu Jogja
     m = folium.Map(location=[-7.7829, 110.3670], zoom_start=12, tiles='CartoDB positron')
     
     for i, row in df_trans.iterrows():
-        # Menentukan warna berdasarkan status
         if row['Status'] == 'Gridlock (Lumpuh)':
-            warna = '#e74c3c' # Merah
+            warna = '#e74c3c' 
         elif row['Status'] == 'Padat Merayap':
-            warna = '#f39c12' # Orange
+            warna = '#f39c12' 
         else:
-            warna = '#2ecc71' # Hijau
+            warna = '#2ecc71' 
             
-        # Membuat Pop-up Interaktif
         html_tooltip = f"""
         <div style="font-family: Arial; font-size: 12px;">
             <b>{row['Simpang_Jalan']}</b> ({row['Wilayah']})<br>
@@ -153,7 +147,7 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
         
         folium.CircleMarker(
             location=[row['Lat'], row['Lon']],
-            radius=row['Volume_Harian'] / 4000, # Besaran lingkaran sesuai volume kendaraan
+            radius=row['Volume_Harian'] / 4000, 
             color=warna,
             fill=True,
             fill_color=warna,
@@ -161,10 +155,9 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
             tooltip=html_tooltip
         ).add_to(m)
         
-    # Menampilkan peta Folium ke dalam Streamlit
-    components.html(m._repr_html_(), height=500)
+    # Perubahan kunci: Menggunakan st_folium menggantikan components.html
+    st_folium(m, width=900, height=500, returned_objects=[])
     
-    # Skrip Presentasi Tertanam
     st.warning("""
     🎙️ **Panduan Presentasi Gubernur (Skenario Infrastruktur):**  
     *"Bapak/Ibu sekalian, peta spasial di atas memvisualisasikan titik temu (*bottleneck*) lalu lintas. Lingkaran merah merepresentasikan *Gridlock* di mana volume kendaraan jauh melampaui kapasitas aspal (V/C > 1.0). Coba arahkan kursor ke titik-titik tersebut—penyebaran warna merah di kawasan perbatasan (Ringroad Sleman/Bantul) menegaskan bahwa kemacetan bukan lagi masalah kota madya semata, melainkan masalah aglomerasi. Ini menjadi justifikasi kuat untuk segera membangun *Underpass* baru dan mengintegrasikan armada Trans Jogja lintas kabupaten."*
