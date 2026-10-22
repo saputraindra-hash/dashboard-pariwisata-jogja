@@ -7,6 +7,7 @@ from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 import folium
 from streamlit_folium import st_folium
+import requests
 import os
 
 st.set_page_config(page_title="Command Center Gubernur DIY", layout="wide", initial_sidebar_state="expanded")
@@ -16,7 +17,8 @@ st.sidebar.title("🏛️ Menu Gubernur")
 menu = st.sidebar.radio("Pilih Sektor Analisis Kebijakan:", [
     "1. Ketimpangan & Kemiskinan (Sosial)",
     "2. Tata Ruang & Pangan (Ekologi)",
-    "3. Aglomerasi & Transportasi (Infrastruktur)"
+    "3. Aglomerasi & Transportasi (Infrastruktur)",
+    "4. Distribusi Pariwisata (API Geoportal)"
 ])
 st.sidebar.divider()
 
@@ -55,11 +57,6 @@ if menu == "1. Ketimpangan & Kemiskinan (Sosial)":
                          title="Kuadran Ketimpangan vs Kemiskinan", size_max=20)
     fig_soc.update_layout(template="plotly_white", height=450)
     st.plotly_chart(fig_soc, use_container_width=True)
-    
-    st.info("""
-    🎙️ **Panduan Presentasi Gubernur (Skenario Bantuan Sosial):**  
-    *"Bapak/Ibu, grafik kuadran ini menggunakan AI untuk mengelompokkan wilayah. Kapanewon yang berada di titik merah besar (Prioritas 1) adalah wilayah dengan tingkat kemiskinan dan pengangguran ekstrem. Kami merekomendasikan intervensi APBD berupa padat karya dan Bansos difokuskan secara eksklusif ke wilayah merah ini agar Gini Ratio provinsi bisa turun signifikan tahun depan."*
-    """)
 
 # ==============================================================================
 # MENU 2: TATA RUANG & KETAHANAN PANGAN
@@ -95,15 +92,9 @@ elif menu == "2. Tata Ruang & Pangan (Ekologi)":
     
     fig_pangan.update_layout(height=450, template="plotly_white", title="Proyeksi Persilangan Krisis Pangan DIY (2015-2035)")
     st.plotly_chart(fig_pangan, use_container_width=True)
-    
-    st.info("""
-    🎙️ **Panduan Presentasi Gubernur (Skenario Ekologi & Pangan):**  
-    *(Silakan geser slider Moratorium di kiri sambil membacakan ini)*  
-    *"Pemimpin daerah yang kami hormati, persilangan antara garis merah (konsumsi) dan putus-putus (produksi) adalah tahun di mana DIY resmi krisis beras. Namun, perhatikan layar: Jika kita mengaktifkan Moratorium izin perumahan sebesar 20%, garis produksi (hijau) akan melandai, dan kita berhasil menyelamatkan kedaulatan pangan DIY selama bertahun-tahun ke depan."*
-    """)
 
 # ==============================================================================
-# MENU 3: AGLOMERASI & TRANSPORTASI (STREAMLIT-FOLIUM)
+# MENU 3: AGLOMERASI & TRANSPORTASI
 # ==============================================================================
 elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     st.title("🚦 Manajemen Transportasi Aglomerasi Yogyakarta")
@@ -125,40 +116,82 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     c2.metric("Rata-rata Volume Arteri", f"{df_trans['Volume_Harian'].mean():,.0f} Kendaraan/Hari")
     
     st.markdown("### 🗺️ Peta Interaktif V/C Ratio Jalan Arteri DIY")
-    
     m = folium.Map(location=[-7.7829, 110.3670], zoom_start=12, tiles='OpenStreetMap')
     
     for i, row in df_trans.iterrows():
-        if row['Status'] == 'Gridlock (Lumpuh)':
-            warna = '#e74c3c' 
-        elif row['Status'] == 'Padat Merayap':
-            warna = '#f39c12' 
-        else:
-            warna = '#2ecc71' 
-            
-        html_tooltip = f"""
-        <div style="font-family: Arial; font-size: 12px;">
-            <b>{row['Simpang_Jalan']}</b> ({row['Wilayah']})<br>
-            Volume Harian: {row['Volume_Harian']:,} Kendaraan<br>
-            Kapasitas: {row['Kapasitas_Kendaraan']:,} Kendaraan<br>
-            <b>V/C Ratio: {row['VC_Ratio']:.2f} ({row['Status']})</b>
-        </div>
-        """
+        warna = '#e74c3c' if row['Status'] == 'Gridlock (Lumpuh)' else ('#f39c12' if row['Status'] == 'Padat Merayap' else '#2ecc71')
+        html_tooltip = f"<div style='font-family: Arial; font-size: 12px;'><b>{row['Simpang_Jalan']}</b><br>V/C Ratio: {row['VC_Ratio']:.2f}</div>"
         
         folium.CircleMarker(
             location=[row['Lat'], row['Lon']],
             radius=row['Volume_Harian'] / 4000, 
-            color=warna,
-            fill=True,
-            fill_color=warna,
-            fill_opacity=0.7,
-            tooltip=html_tooltip
+            color=warna, fill=True, fill_color=warna, fill_opacity=0.7, tooltip=html_tooltip
         ).add_to(m)
         
-    # Perubahan kunci: Menggunakan st_folium menggantikan components.html
     st_folium(m, width=900, height=500, returned_objects=[])
+
+# ==============================================================================
+# MENU 4: PARIWISATA & DISTRIBUSI (API GEOPORTAL JOGJAPROV)
+# ==============================================================================
+elif menu == "4. Distribusi Pariwisata (API Geoportal)":
+    st.title("🗺️ Peta Kunjungan Daya Tarik Wisata (DTW)")
+    st.markdown("🌐 *Menarik data secara **Real-Time** dari API Geoportal Pemerintah Daerah Istimewa Yogyakarta.*")
     
-    st.warning("""
-    🎙️ **Panduan Presentasi Gubernur (Skenario Infrastruktur):**  
-    *"Bapak/Ibu sekalian, peta spasial di atas memvisualisasikan titik temu (*bottleneck*) lalu lintas. Lingkaran merah merepresentasikan *Gridlock* di mana volume kendaraan jauh melampaui kapasitas aspal (V/C > 1.0). Coba arahkan kursor ke titik-titik tersebut—penyebaran warna merah di kawasan perbatasan (Ringroad Sleman/Bantul) menegaskan bahwa kemacetan bukan lagi masalah kota madya semata, melainkan masalah aglomerasi. Ini menjadi justifikasi kuat untuk segera membangun *Underpass* baru dan mengintegrasikan armada Trans Jogja lintas kabupaten."*
-    """)
+    # URL API dengan parameter outSR=4326 agar output berformat Latitude/Longitude standar
+    api_url = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
+    
+    with st.spinner("🔄 Sedang mengunduh data spasial dari server Geoportal Pemda DIY..."):
+        try:
+            response = requests.get(api_url, timeout=15)
+            data = response.json()
+            
+            if 'features' in data:
+                records = []
+                for f in data['features']:
+                    attr = f.get('attributes', {})
+                    geom = f.get('geometry', {})
+                    # Ekstraksi Koordinat
+                    if geom:
+                        attr['Lon'] = geom.get('x')
+                        attr['Lat'] = geom.get('y')
+                    records.append(attr)
+                
+                df_api = pd.DataFrame(records)
+                
+                # Filter data yang memiliki koordinat valid
+                df_map = df_api.dropna(subset=['Lat', 'Lon'])
+                
+                c_api1, c_api2 = st.columns(2)
+                c_api1.metric("Total Destinasi Wisata Ditemukan", len(df_map))
+                c_api2.success("Koneksi API Geoportal: Terhubung (200 OK)")
+                
+                # Render Peta Interaktif
+                st.markdown("### 📍 Persebaran Spasial Destinasi Wisata")
+                m_wisata = folium.Map(location=[-7.80, 110.40], zoom_start=10, tiles='OpenStreetMap')
+                
+                for idx, row in df_map.iterrows():
+                    # Membuat teks pop-up dinamis yang merangkum semua atribut data yang dikirim API
+                    info_teks = "".join([f"<b>{k}</b>: {v}<br>" for k, v in row.to_dict().items() if k not in ['Lat', 'Lon', 'OBJECTID', 'Shape'] and pd.notna(v)])
+                    
+                    folium.Marker(
+                        location=[row['Lat'], row['Lon']],
+                        icon=folium.Icon(color='blue', icon='info-sign'),
+                        tooltip=f"<div style='font-size:11px; max-width: 250px;'>{info_teks}</div>"
+                    ).add_to(m_wisata)
+                
+                st_folium(m_wisata, width=900, height=500, returned_objects=[])
+                
+                # Tampilkan Raw Data 
+                st.markdown("### 🗄️ Raw Data dari Database Geoportal")
+                st.dataframe(df_api, use_container_width=True)
+                
+                st.info("""
+                🎙️ **Panduan Presentasi Gubernur (Skenario Pariwisata Live):**  
+                *"Sebagai penutup, kami mendemonstrasikan kapabilitas 'Live Integration'. Layar ini tidak membaca file Excel, melainkan menyedot data langsung secara *real-time* dari server Geoportal Pemda DIY. Saat kita arahkan kursor ke pin biru di atas peta, seluruh metrik kunjungan Daya Tarik Wisata otomatis ditampilkan. Ini membuktikan bahwa Command Center kita sudah siap terintegrasi ke dalam ekosistem Big Data provinsi secara utuh."*
+                """)
+                
+            else:
+                st.error("Gagal membaca struktur data (features) dari API Geoportal.")
+                
+        except Exception as e:
+            st.error(f"Koneksi ke API gagal. Server Geoportal mungkin sedang down atau sibuk. Error: {e}")
