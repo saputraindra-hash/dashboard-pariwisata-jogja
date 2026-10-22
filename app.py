@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
+import folium
+import streamlit.components.v1 as components
 import os
 
 st.set_page_config(page_title="Command Center Gubernur DIY", layout="wide", initial_sidebar_state="expanded")
@@ -18,7 +20,6 @@ menu = st.sidebar.radio("Pilih Sektor Analisis Kebijakan:", [
 ])
 st.sidebar.divider()
 
-# Fungsi untuk mengecek keberadaan file
 def check_file(filename):
     if not os.path.exists(filename):
         st.error(f"⚠️ File '{filename}' tidak ditemukan di sistem. Pastikan Anda telah membuatnya di GitHub.")
@@ -52,10 +53,14 @@ if menu == "1. Ketimpangan & Kemiskinan (Sosial)":
     fig_soc = px.scatter(df_soc, x='Tingkat_Kemiskinan_Persen', y='Gini_Ratio', color='Status_Prioritas', 
                          color_discrete_map=color_map, size='Pengangguran_Persen', hover_name='Kapanewon',
                          title="Kuadran Ketimpangan vs Kemiskinan", size_max=20)
-    fig_soc.update_layout(template="plotly_white", height=500)
+    fig_soc.update_layout(template="plotly_white", height=450)
     st.plotly_chart(fig_soc, use_container_width=True)
     
-    st.dataframe(df_soc[['Kapanewon', 'Kabupaten', 'Tingkat_Kemiskinan_Persen', 'Gini_Ratio', 'Status_Prioritas']].sort_values(by='Tingkat_Kemiskinan_Persen', ascending=False), use_container_width=True)
+    # Skrip Presentasi Tertanam
+    st.info("""
+    🎙️ **Panduan Presentasi Gubernur (Skenario Bantuan Sosial):**  
+    *"Bapak/Ibu, grafik kuadran ini menggunakan AI untuk mengelompokkan wilayah. Kapanewon yang berada di titik merah besar (Prioritas 1) adalah wilayah dengan tingkat kemiskinan dan pengangguran ekstrem. Kami merekomendasikan intervensi APBD berupa padat karya dan Bansos difokuskan secara eksklusif ke wilayah merah ini agar Gini Ratio provinsi bisa turun signifikan tahun depan."*
+    """)
 
 # ==============================================================================
 # MENU 2: TATA RUANG & KETAHANAN PANGAN
@@ -89,15 +94,22 @@ elif menu == "2. Tata Ruang & Pangan (Ekologi)":
     if moratorium_target > 0:
          fig_pangan.add_trace(go.Scatter(x=X_future.flatten(), y=pred_prod_simulasi, mode='lines', name=f'Produksi Jika Moratorium {moratorium_target}%', line=dict(color='#2ecc71', width=4)))
     
-    fig_pangan.update_layout(height=500, template="plotly_white", title="Proyeksi Persilangan Krisis Pangan DIY (2015-2035)")
+    fig_pangan.update_layout(height=450, template="plotly_white", title="Proyeksi Persilangan Krisis Pangan DIY (2015-2035)")
     st.plotly_chart(fig_pangan, use_container_width=True)
+    
+    # Skrip Presentasi Tertanam
+    st.info("""
+    🎙️ **Panduan Presentasi Gubernur (Skenario Ekologi & Pangan):**  
+    *(Silakan geser slider Moratorium di kiri sambil membacakan ini)*  
+    *"Pemimpin daerah yang kami hormati, persilangan antara garis merah (konsumsi) dan putus-putus (produksi) adalah tahun di mana DIY resmi krisis beras. Namun, perhatikan layar: Jika kita mengaktifkan Moratorium izin perumahan sebesar 20%, garis produksi (hijau) akan melandai, dan kita berhasil menyelamatkan kedaulatan pangan DIY selama bertahun-tahun ke depan."*
+    """)
 
 # ==============================================================================
-# MENU 3: AGLOMERASI & TRANSPORTASI
+# MENU 3: AGLOMERASI & TRANSPORTASI (FOLIUM MAP)
 # ==============================================================================
 elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     st.title("🚦 Manajemen Transportasi Aglomerasi Yogyakarta")
-    st.markdown("Pemetaan titik kemacetan (Bottleneck) dan kalkulasi *Volume-to-Capacity (V/C) Ratio*.")
+    st.markdown("Analisis Spasial titik temu kemacetan (Bottleneck) kawasan Aglomerasi menggunakan *Geospatial Mapping*.")
     
     check_file('transport_diy.csv')
     df_trans = pd.read_csv('transport_diy.csv')
@@ -109,17 +121,51 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
         else: return 'Lancar'
         
     df_trans['Status'] = df_trans['VC_Ratio'].apply(status_kemacetan)
-    color_trans_map = {'Gridlock (Lumpuh)': '#e74c3c', 'Padat Merayap': '#f1c40f', 'Lancar': '#2ecc71'}
     
     c1, c2 = st.columns(2)
     c1.metric("Titik Gridlock (V/C Ratio > 1.0)", len(df_trans[df_trans['Status'] == 'Gridlock (Lumpuh)']))
     c2.metric("Rata-rata Volume Arteri", f"{df_trans['Volume_Harian'].mean():,.0f} Kendaraan/Hari")
     
-    fig_trans = px.scatter(df_trans, x='Simpang_Jalan', y='VC_Ratio', size='Volume_Harian', color='Status',
-                           color_discrete_map=color_trans_map, hover_name='Wilayah', size_max=40,
-                           title="Peta Beban Kemacetan (Volume-to-Capacity Ratio) Kawasan Aglomerasi")
-    fig_trans.add_hline(y=1.0, line_dash="dash", line_color="red", annotation_text="Batas Maksimal Kapasitas Jalan (V/C = 1.0)")
-    fig_trans.update_layout(template="plotly_white", height=500)
-    st.plotly_chart(fig_trans, use_container_width=True)
+    st.markdown("### 🗺️ Peta Interaktif V/C Ratio Jalan Arteri DIY")
     
-    st.dataframe(df_trans[['Simpang_Jalan', 'Wilayah', 'Volume_Harian', 'VC_Ratio', 'Status']].sort_values(by='VC_Ratio', ascending=False), use_container_width=True)
+    # Pembuatan Peta Spasial menggunakan Folium
+    # Kordinat pusat: Tugu Jogja
+    m = folium.Map(location=[-7.7829, 110.3670], zoom_start=12, tiles='CartoDB positron')
+    
+    for i, row in df_trans.iterrows():
+        # Menentukan warna berdasarkan status
+        if row['Status'] == 'Gridlock (Lumpuh)':
+            warna = '#e74c3c' # Merah
+        elif row['Status'] == 'Padat Merayap':
+            warna = '#f39c12' # Orange
+        else:
+            warna = '#2ecc71' # Hijau
+            
+        # Membuat Pop-up Interaktif
+        html_tooltip = f"""
+        <div style="font-family: Arial; font-size: 12px;">
+            <b>{row['Simpang_Jalan']}</b> ({row['Wilayah']})<br>
+            Volume Harian: {row['Volume_Harian']:,} Kendaraan<br>
+            Kapasitas: {row['Kapasitas_Kendaraan']:,} Kendaraan<br>
+            <b>V/C Ratio: {row['VC_Ratio']:.2f} ({row['Status']})</b>
+        </div>
+        """
+        
+        folium.CircleMarker(
+            location=[row['Lat'], row['Lon']],
+            radius=row['Volume_Harian'] / 4000, # Besaran lingkaran sesuai volume kendaraan
+            color=warna,
+            fill=True,
+            fill_color=warna,
+            fill_opacity=0.7,
+            tooltip=html_tooltip
+        ).add_to(m)
+        
+    # Menampilkan peta Folium ke dalam Streamlit
+    components.html(m._repr_html_(), height=500)
+    
+    # Skrip Presentasi Tertanam
+    st.warning("""
+    🎙️ **Panduan Presentasi Gubernur (Skenario Infrastruktur):**  
+    *"Bapak/Ibu sekalian, peta spasial di atas memvisualisasikan titik temu (*bottleneck*) lalu lintas. Lingkaran merah merepresentasikan *Gridlock* di mana volume kendaraan jauh melampaui kapasitas aspal (V/C > 1.0). Coba arahkan kursor ke titik-titik tersebut—penyebaran warna merah di kawasan perbatasan (Ringroad Sleman/Bantul) menegaskan bahwa kemacetan bukan lagi masalah kota madya semata, melainkan masalah aglomerasi. Ini menjadi justifikasi kuat untuk segera membangun *Underpass* baru dan mengintegrasikan armada Trans Jogja lintas kabupaten."*
+    """)
