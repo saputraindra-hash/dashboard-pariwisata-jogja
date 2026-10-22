@@ -126,7 +126,7 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
     
     st.markdown("### 🗺️ Peta Interaktif V/C Ratio Jalan Arteri DIY")
     
-    m = folium.Map(location=[-7.7829, 110.3670], zoom_start=12, tiles='CartoDB positron')
+    m = folium.Map(location=[-7.7829, 110.3670], zoom_start=12, tiles='OpenStreetMap')
     
     for i, row in df_trans.iterrows():
         if row['Status'] == 'Gridlock (Lumpuh)':
