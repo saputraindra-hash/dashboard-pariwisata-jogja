@@ -133,14 +133,16 @@ elif menu == "3. Aglomerasi & Transportasi (Infrastruktur)":
 # ==============================================================================
 # MENU 4: PARIWISATA & DISTRIBUSI (API GEOPORTAL JOGJAPROV)
 # ==============================================================================
+# ==============================================================================
+# MENU 4: PARIWISATA & DISTRIBUSI (API GEOPORTAL + AI CLUSTERING)
+# ==============================================================================
 elif menu == "4. Distribusi Pariwisata (API Geoportal)":
-    st.title("🗺️ Peta Kunjungan Daya Tarik Wisata (DTW)")
-    st.markdown("🌐 *Menarik data secara **Real-Time** dari API Geoportal Pemerintah Daerah Istimewa Yogyakarta.*")
+    st.title("🗺️ Evaluasi Kawasan Strategis Pariwisata (KSP)")
+    st.markdown("🌐 *Menggunakan algoritma AI untuk mengevaluasi data Real-Time dari API Geoportal Pemda DIY.*")
     
-    # URL API dengan parameter outSR=4326 agar output berformat Latitude/Longitude standar
     api_url = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=json"
     
-    with st.spinner("🔄 Sedang mengunduh data spasial dari server Geoportal Pemda DIY..."):
+    with st.spinner("🔄 Sedang memproses algoritma evaluasi spasial dari server Geoportal..."):
         try:
             response = requests.get(api_url, timeout=15)
             data = response.json()
@@ -150,48 +152,56 @@ elif menu == "4. Distribusi Pariwisata (API Geoportal)":
                 for f in data['features']:
                     attr = f.get('attributes', {})
                     geom = f.get('geometry', {})
-                    # Ekstraksi Koordinat
                     if geom:
                         attr['Lon'] = geom.get('x')
                         attr['Lat'] = geom.get('y')
                     records.append(attr)
                 
                 df_api = pd.DataFrame(records)
+                df_map = df_api.dropna(subset=['Lat', 'Lon']).copy()
                 
-                # Filter data yang memiliki koordinat valid
-                df_map = df_api.dropna(subset=['Lat', 'Lon'])
+                # --- ALGORITMA EVALUASI (K-MEANS SPATIAL CLUSTERING) ---
+                # Mengelompokkan destinasi menjadi 3 Kawasan Strategis berdasarkan kedekatan geografis
+                kmeans_spatial = KMeans(n_clusters=3, random_state=42, n_init=10)
+                df_map['Kawasan_Cluster'] = kmeans_spatial.fit_predict(df_map[['Lat', 'Lon']])
                 
-                c_api1, c_api2 = st.columns(2)
-                c_api1.metric("Total Destinasi Wisata Ditemukan", len(df_map))
-                c_api2.success("Koneksi API Geoportal: Terhubung (200 OK)")
+                # Pemetaan warna untuk setiap kawasan
+                cluster_colors = {0: '#e74c3c', 1: '#3498db', 2: '#f1c40f'}
+                cluster_names = {0: 'Kawasan Strategis A', 1: 'Kawasan Strategis B', 2: 'Kawasan Strategis C'}
                 
-                # Render Peta Interaktif
-                st.markdown("### 📍 Persebaran Spasial Destinasi Wisata")
+                c_api1, c_api2, c_api3 = st.columns(3)
+                c_api1.metric("Total Daya Tarik Wisata", len(df_map))
+                c_api2.metric("Pusat Kawasan Terbentuk (AI)", "3 Zona Episentrum")
+                c_api3.success("Status Evaluasi API: Real-Time Aktif")
+                
+                st.markdown("### 📍 Pemetaan Evaluasi Kawasan (AI Clustering)")
                 m_wisata = folium.Map(location=[-7.80, 110.40], zoom_start=10, tiles='OpenStreetMap')
                 
                 for idx, row in df_map.iterrows():
-                    # Membuat teks pop-up dinamis yang merangkum semua atribut data yang dikirim API
-                    info_teks = "".join([f"<b>{k}</b>: {v}<br>" for k, v in row.to_dict().items() if k not in ['Lat', 'Lon', 'OBJECTID', 'Shape'] and pd.notna(v)])
+                    info_teks = "".join([f"<b>{k}</b>: {v}<br>" for k, v in row.to_dict().items() if k not in ['Lat', 'Lon', 'OBJECTID', 'Shape', 'Kawasan_Cluster'] and pd.notna(v)])
                     
-                    folium.Marker(
+                    folium.CircleMarker(
                         location=[row['Lat'], row['Lon']],
-                        icon=folium.Icon(color='blue', icon='info-sign'),
-                        tooltip=f"<div style='font-size:11px; max-width: 250px;'>{info_teks}</div>"
+                        radius=6,
+                        color=cluster_colors[row['Kawasan_Cluster']],
+                        fill=True,
+                        fill_color=cluster_colors[row['Kawasan_Cluster']],
+                        fill_opacity=0.9,
+                        tooltip=f"<div style='font-size:11px; max-width: 250px;'><b>ZONA: {cluster_names[row['Kawasan_Cluster']]}</b><br><br>{info_teks}</div>"
                     ).add_to(m_wisata)
                 
                 st_folium(m_wisata, width=900, height=500, returned_objects=[])
                 
-                # Tampilkan Raw Data 
-                st.markdown("### 🗄️ Raw Data dari Database Geoportal")
-                st.dataframe(df_api, use_container_width=True)
-                
                 st.info("""
-                🎙️ **Panduan Presentasi Gubernur (Skenario Pariwisata Live):**  
-                *"Sebagai penutup, kami mendemonstrasikan kapabilitas 'Live Integration'. Layar ini tidak membaca file Excel, melainkan menyedot data langsung secara *real-time* dari server Geoportal Pemda DIY. Saat kita arahkan kursor ke pin biru di atas peta, seluruh metrik kunjungan Daya Tarik Wisata otomatis ditampilkan. Ini membuktikan bahwa Command Center kita sudah siap terintegrasi ke dalam ekosistem Big Data provinsi secara utuh."*
+                🎙️ **Panduan Presentasi Gubernur (Skenario Evaluasi AI):**  
+                *"Bapak/Ibu, titik-titik di layar ini bukan sekadar peta biasa. Aplikasi kita telah menjalankan algoritma Kecerdasan Buatan (K-Means) untuk membaca koordinat API Geoportal dan mengevaluasinya menjadi 3 Kawasan Strategis (Merah, Biru, Kuning) secara otomatis. Pemetaan episentrum ini sangat krusial bagi Bappeda untuk memutuskan di mana trayek bus pariwisata baru harus dibuka agar bisa melayani satu *cluster* wisata secara efisien."*
                 """)
                 
             else:
                 st.error("Gagal membaca struktur data (features) dari API Geoportal.")
+                
+        except Exception as e:
+            st.error(f"Koneksi ke API gagal. Server Geoportal mungkin sedang down atau sibuk. Error: {e}")
                 
         except Exception as e:
             st.error(f"Koneksi ke API gagal. Server Geoportal mungkin sedang down atau sibuk. Error: {e}")
