@@ -155,14 +155,20 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
         components.iframe(url_3d, height=650, scrolling=True)
         
 # ==============================================================================
-# MENU 6: SIMULASI EVAKUASI POINT-TO-POINT (DIJKSTRA)
+# MENU 6: INTERACTIVE CLICK-TO-ROUTE (DIJKSTRA)
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
     import networkx as nx
     
-    st.title("🚨 DSS: Simulasi Evakuasi Kedaruratan Medis")
-    st.markdown("Kecerdasan Buatan akan mengukur jarak aktual dan memetakan rute jalan raya secara spesifik **hanya pada titik yang dipilih** oleh eksekutif.")
+    st.title("🚨 DSS: Simulasi Evakuasi Darurat (Click-to-Route)")
+    st.markdown("Klik langsung pada **1 titik Destinasi Wisata** dan **1 titik Faskes** di atas peta, lalu tekan tombol untuk menjalankan AI Dijkstra.")
     
+    # 1. INISIALISASI MEMORI KLIK (SESSION STATE)
+    if 'wisata_terpilih' not in st.session_state:
+        st.session_state.wisata_terpilih = None
+    if 'faskes_terpilih' not in st.session_state:
+        st.session_state.faskes_terpilih = None
+
     @st.cache_data(ttl=3600)
     def fetch_api_gdf(url, geom_type="point"):
         try:
@@ -176,6 +182,7 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 attr = f.get('attributes', {})
                 if geom_type == "point":
                     attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
+                    attr['nama_tampil'] = str(attr.get('nama', 'Destinasi/Faskes')) # Amankan string
                 records.append(attr)
                 
             df = pd.DataFrame(records)
@@ -187,7 +194,6 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         except:
             return gpd.GeoDataFrame(), {}
 
-    # Memindahkan pembuatan Graph ke dalam Cache agar sangat cepat
     @st.cache_data(ttl=3600)
     def build_road_graph(raw_jalan):
         G = nx.Graph()
@@ -198,7 +204,6 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                         for i in range(len(path)-1):
                             p1 = (path[i][0], path[i][1])
                             p2 = (path[i+1][0], path[i+1][1])
-                            # Asumsi 1 derajat ~ 111.000 meter
                             G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
         return G
 
@@ -214,55 +219,91 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         if not wisata_gdf.empty and not faskes_gdf.empty:
             G_jalan = build_road_graph(raw_jalan)
             
-            st.markdown("### 🚑 Tentukan Titik Evakuasi")
-            wisata_list = [str(row.get('nama', f"Destinasi {idx}")) for idx, row in wisata_gdf.iterrows()]
-            faskes_list = [str(row.get('nama', f"Faskes {idx}")) for idx, row in faskes_gdf.iterrows()]
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                asal_wisata = st.selectbox("📍 Titik Kejadian (Pariwisata):", wisata_list)
-            with col2:
-                tujuan_faskes = st.selectbox("🏥 Tujuan Rujukan (Faskes BPJS):", faskes_list)
-                
-            hitung_rute = st.button("🚨 Hitung Jarak & Gambar Rute Dijkstra", type="primary")
+            # --- PANEL UI (STATUS KLIK & TOMBOL ROUTING) ---
+            st.markdown("### 🖱️ Panel Kontrol Eksekutif")
+            c1, c2, c3 = st.columns([1.5, 1.5, 1])
+            with c1:
+                st.info(f"🏖️ **Wisata:** {st.session_state.wisata_terpilih or 'Pilih di Peta...'}")
+            with c2:
+                st.success(f"🏥 **Faskes:** {st.session_state.faskes_terpilih or 'Pilih di Peta...'}")
+            with c3:
+                hitung_rute = st.button("🚨 Eksekusi Routing", type="primary", use_container_width=True)
 
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
-            def cari_simpul(graph, titik):
-                nodes = list(graph.nodes)
-                return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
+            # Render Titik Wisata (Tooltips dikunci menggunakan format khusus untuk dibaca Python)
+            for idx, row in wisata_gdf.iterrows():
+                folium.CircleMarker(
+                    [row.geometry.y, row.geometry.x], radius=5, color="blue", fill=True,
+                    tooltip=f"WISATA: {row['nama_tampil']}" # Format kaku agar mudah ditangkap kliknya
+                ).add_to(m_master)
 
-            # Jika tombol diklik, hanya proses dua titik tersebut
+            # Render Titik Faskes
+            for idx, row in faskes_gdf.iterrows():
+                folium.CircleMarker(
+                    [row.geometry.y, row.geometry.x], radius=4, color="green", fill=True,
+                    tooltip=f"FASKES: {row['nama_tampil']}"
+                ).add_to(m_master)
+
+            # --- LOGIKA TOMBOL EKSEKUSI DIJKSTRA ---
             if hitung_rute:
-                w_idx = wisata_list.index(asal_wisata)
-                f_idx = faskes_list.index(tujuan_faskes)
-                
-                titik_w = Point(wisata_gdf.iloc[w_idx].geometry.x, wisata_gdf.iloc[w_idx].geometry.y)
-                titik_f = Point(faskes_gdf.iloc[f_idx].geometry.x, faskes_gdf.iloc[f_idx].geometry.y)
-                
-                simpul_w = cari_simpul(G_jalan, titik_w)
-                simpul_f = cari_simpul(G_jalan, titik_f)
-                
-                if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
-                    jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    jarak_km = jarak_meter / 1000
+                if st.session_state.wisata_terpilih and st.session_state.faskes_terpilih:
+                    # Ambil baris data berdasarkan nama yang diklik
+                    w_match = wisata_gdf[wisata_gdf['nama_tampil'] == st.session_state.wisata_terpilih]
+                    f_match = faskes_gdf[faskes_gdf['nama_tampil'] == st.session_state.faskes_terpilih]
                     
-                    st.success(f"✅ **Hasil Analisis Rute:** Jarak jalan raya dari **{asal_wisata}** ke **{tujuan_faskes}** adalah **{jarak_km:.2f} Km**.")
-                    
-                    # Hanya menggambar garis rute merah
-                    rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
-                    folium.PolyLine(rute_latlon, color="#e74c3c", weight=6, opacity=0.9).add_to(m_master)
-                    
-                    # Memasang Pin eksklusif pada dua titik yang dipilih
-                    folium.Marker([titik_w.y, titik_w.x], icon=folium.Icon(color='red', icon='info-sign'), tooltip=f"Kejadian: {asal_wisata}").add_to(m_master)
-                    folium.Marker([titik_f.y, titik_f.x], icon=folium.Icon(color='green', icon='plus'), tooltip=f"Rujukan: {tujuan_faskes}").add_to(m_master)
-                    
-                    # Otomatis zoom peta ke area rute tersebut
-                    m_master.fit_bounds(rute_latlon)
-                else:
-                    st.error("⚠️ Rute darat terputus atau jalan provinsi tidak menjangkau area ini secara langsung.")
-            else:
-                st.info("Pilih lokasi asal dan tujuan di atas, lalu klik tombol merah untuk menjalankan simulasi.")
+                    if not w_match.empty and not f_match.empty:
+                        w_row = w_match.iloc[0]
+                        f_row = f_match.iloc[0]
+                        
+                        titik_w = Point(w_row.geometry.x, w_row.geometry.y)
+                        titik_f = Point(f_row.geometry.x, f_row.geometry.y)
+                        
+                        def cari_simpul(graph, titik):
+                            nodes = list(graph.nodes)
+                            return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
 
-            st_folium(m_master, width=900, height=550, returned_objects=[])
+                        simpul_w = cari_simpul(G_jalan, titik_w)
+                        simpul_f = cari_simpul(G_jalan, titik_f)
+                        
+                        if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
+                            jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                            rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                            jarak_km = jarak_meter / 1000
+                            
+                            st.success(f"✅ Jarak evakuasi menyusuri jalan raya adalah **{jarak_km:.2f} Kilometer**.")
+                            
+                            # Gambar rute di peta
+                            rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
+                            folium.PolyLine(rute_latlon, color="red", weight=6, opacity=0.9).add_to(m_master)
+                            folium.Marker([titik_w.y, titik_w.x], icon=folium.Icon(color='red', icon='info-sign')).add_to(m_master)
+                            folium.Marker([titik_f.y, titik_f.x], icon=folium.Icon(color='green', icon='plus')).add_to(m_master)
+                            
+                            m_master.fit_bounds(rute_latlon)
+                        else:
+                            st.error("⚠️ Jalan terputus, tidak ada rute darat yang bisa ditempuh.")
+                else:
+                    st.warning("⚠️ Bapak Gubernur, silakan pastikan 1 titik Wisata dan 1 titik Faskes sudah terpilih di peta sebelum menekan eksekusi.")
+
+            # --- RENDER PETA & TANGKAP EVENT KLIK ---
+            map_data = st_folium(m_master, width=900, height=550, key="map_interaktif")
+
+            # --- LOGIKA PENANGKAP KLIK (AUTO-UPDATE SESSION STATE) ---
+            if map_data and map_data.get("last_object_clicked_tooltip"):
+                klik_teks = map_data["last_object_clicked_tooltip"]
+                
+                # Jika yang diklik adalah titik Wisata
+                if klik_teks.startswith("WISATA: "):
+                    nama = klik_teks.replace("WISATA: ", "")
+                    if st.session_state.wisata_terpilih != nama:
+                        st.session_state.wisata_terpilih = nama
+                        st.rerun() # Refresh layar untuk mengupdate teks di panel UI
+                        
+                # Jika yang diklik adalah titik Faskes
+                elif klik_teks.startswith("FASKES: "):
+                    nama = klik_teks.replace("FASKES: ", "")
+                    if st.session_state.faskes_terpilih != nama:
+                        st.session_state.faskes_terpilih = nama
+                        st.rerun() # Refresh layar untuk mengupdate teks di panel UI
+        else:
+            st.error("Gagal menarik data dari server Geoportal.")
