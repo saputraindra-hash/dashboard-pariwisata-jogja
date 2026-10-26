@@ -1,7 +1,7 @@
 import streamlit as st
 
 # Import semua sub-file dari folder modules
-from modules import modul_1, modul_2, modul_6 
+from modules import modul_1,
 
 # Konfigurasi Halaman 
 st.set_page_config(page_title="Command Center Gubernur DIY", layout="wide", page_icon="🏛️")
