@@ -155,7 +155,7 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
         components.iframe(url_3d, height=650, scrolling=True)
         
 # ==============================================================================
-# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA
+# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (FINAL)
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
     import networkx as nx
@@ -177,9 +177,18 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 geom = f.get('geometry')
                 if not geom: continue
                 attr = f.get('attributes', {})
+                
+                # --- AUTO-DETEKSI KOLOM NAMA ---
                 if geom_type == "point":
                     attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
-                    attr['nama_tampil'] = str(attr.get('nama', 'Tidak Bernama'))
+                    nama_ditemukan = "Tidak Bernama"
+                    for key, value in attr.items():
+                        if 'nama' in key.lower() or 'name' in key.lower():
+                            if value:
+                                nama_ditemukan = str(value)
+                                break
+                    attr['nama_tampil'] = nama_ditemukan
+                    
                 records.append(attr)
                 
             df = pd.DataFrame(records)
@@ -191,40 +200,17 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         except:
             return gpd.GeoDataFrame(), {}
 
-   @st.cache_data(ttl=3600)
-    def fetch_api_gdf(url, geom_type="point"):
-        try:
-            res = requests.get(url, timeout=15).json()
-            if 'features' not in res: return gpd.GeoDataFrame(), res
-            
-            records = []
-            for f in res['features']:
-                geom = f.get('geometry')
-                if not geom: continue
-                attr = f.get('attributes', {})
-                
-                # --- AUTO-DETEKSI KOLOM NAMA ---
-                # Mencari key apapun di dalam data yang mengandung kata 'nama' atau 'name'
-                nama_ditemukan = "Tidak Bernama"
-                for key, value in attr.items():
-                    if 'nama' in key.lower() or 'name' in key.lower():
-                        if value: # Pastikan valuenya tidak None/Kosong
-                            nama_ditemukan = str(value)
-                            break
-                
-                if geom_type == "point":
-                    attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
-                    attr['nama_tampil'] = nama_ditemukan # Menyimpan nama yang berhasil dilacak
-                records.append(attr)
-                
-            df = pd.DataFrame(records)
-            if geom_type == "point":
-                df = df.dropna(subset=['Lat', 'Lon'])
-                geometry = [Point(xy) for xy in zip(df['Lon'], df['Lat'])]
-                return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
-            return df, res
-        except:
-            return gpd.GeoDataFrame(), {}
+    @st.cache_data(ttl=3600)
+    def build_road_graph(raw_jalan):
+        G = nx.Graph()
+        if 'features' in raw_jalan:
+            for f in raw_jalan['features']:
+                if 'geometry' in f and 'paths' in f['geometry']:
+                    for path in f['geometry']['paths']:
+                        for i in range(len(path)-1):
+                            p1 = (path[i][0], path[i][1])
+                            p2 = (path[i+1][0], path[i+1][1])
+                            G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
         return G
 
     with st.spinner("🔄 Memuat Geospasial Instan (Tahap 1)..."):
@@ -237,18 +223,15 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         _, raw_jalan = fetch_api_gdf(url_jalan, "line")
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
-            # Pastikan faskes punya index yang rapi untuk di-join
             faskes_gdf = faskes_gdf.reset_index(drop=True)
             
             # --- TAHAP 1: FILTER UDARA INSTAN ---
             wisata_utm = wisata_gdf.to_crs("EPSG:32749")
             faskes_utm = faskes_gdf.to_crs("EPSG:32749")
             
-            # sjoin_nearest mengembalikan index_right (index dari Faskes terdekat)
             evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
             evaluasi = evaluasi.to_crs("EPSG:4326")
             
-            # Membagi Zona
             zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
             zona_bahaya = evaluasi[evaluasi['Jarak_Udara_Meter'] > batas_meter]
 
@@ -260,66 +243,16 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             # --- TAHAP 2: PANEL INVESTIGASI DIJKSTRA ---
             st.markdown("### 🚑 Investigasi Rute Darurat (Zona Bahaya)")
             
-            # Mengambil nama-nama wisata yang masuk zona merah saja
             daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
             
             col_sel, col_btn = st.columns([3, 1])
             with col_sel:
                 titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan untuk diukur jalan rayanya:", daftar_bahaya)
             with col_btn:
-                st.markdown("<br>", unsafe_allow_html=True) # Perataan tombol
+                st.markdown("<br>", unsafe_allow_html=True) 
                 tombol_dijkstra = st.button("🚨 Eksekusi Dijkstra", type="primary", use_container_width=True)
 
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
-            # Render Zona Aman (Biru)
-            for idx, row in zona_aman.iterrows():
-                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color="blue", fill=True, tooltip=f"AMAN: {nama}").add_to(m_master)
-
-            # Render Zona Bahaya (Merah)
-            for idx, row in zona_bahaya.iterrows():
-                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=6, color="red", fill=True, tooltip=f"BAHAYA: {nama}").add_to(m_master)
-
-            # Render Semua Faskes (Hijau)
-            for idx, row in faskes_gdf.iterrows():
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
-
-       # --- EKSEKUSI DIJKSTRA SAAT TOMBOL DITEKAN ---
-            if tombol_dijkstra and titik_investigasi:
-                G_jalan = build_road_graph(raw_jalan)
-                
-                # Cari baris data Wisata yang dipilih
-                kolom_nama = 'nama_tampil_left' if 'nama_tampil_left' in evaluasi.columns else 'nama_tampil'
-                w_row = zona_bahaya[zona_bahaya[kolom_nama] == titik_investigasi].iloc[0]
-                
-                # Cari baris Faskes terdekat yang sudah ditandai oleh sjoin
-                idx_faskes = w_row['index_right']
-                f_row = faskes_gdf.loc[idx_faskes]
-                
-                # PERBAIKAN: Baris ini sudah utuh dan aman
-                titik_w = Point(w_row.geometry.x, w_row.geometry.y)
-                titik_f = Point(f_row.geometry.x, f_row.geometry.y)
-                
-                def cari_simpul(graph, titik):
-                    nodes = list(graph.nodes)
-                    return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
-
-                simpul_w = cari_simpul(G_jalan, titik_w)
-                simpul_f = cari_simpul(G_jalan, titik_f)
-                
-                if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
-                    jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    jarak_km = jarak_meter / 1000
-                    
-                    st.warning(f"🚨 **Hasil Dijkstra:** Jarak Udara awalnya adalah **{w_row['Jarak_Udara_Meter']/1000:.2f} Km**, namun jika menggunakan ambulans menyusuri jalan raya, jarak aslinya menjadi **{jarak_km:.2f} Kilometer**.")
-                    
-                    rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
-                    folium.PolyLine(rute_latlon, color="#ff0000", weight=7, opacity=0.9).add_to(m_master)
-                    m_master.fit_bounds(rute_latlon)
-                else:
-                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
-
-            st_folium(m_master, width=900, height=550, returned_objects=[])
+            # Render Titik di Peta
+            for idx, row in zona_aman.iterrows
