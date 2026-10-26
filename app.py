@@ -258,11 +258,20 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             for idx, row in pasti_rawan.iterrows():
                 folium.CircleMarker([row.geometry.y, row.geometry.x], radius=8, color="red", fill=True, tooltip=f"<b>{row.get('nama', 'Wisata')}</b><br>Pasti Rawan (Udara > {radius_aman_km} Km)").add_to(m_master)
 
-            # Render Hasil Dijkstra
+           # Render Hasil Dijkstra
             for idx, row in abu_abu_sample.iterrows():
                 j_km = row['Jarak_Jalan_Meter'] / 1000
                 warna = "orange" if j_km > radius_aman_km else "blue" # Orange = Jebakan
                 radius = 8 if j_km > radius_aman_km else 4
                 status = "HIDDEN BLANK SPOT" if j_km > radius_aman_km else "AMAN"
                 
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=radius, color=warna, fill=True, tooltip=f"<b>{row.get('nama', 'Wis
+                # Teks dipisah ke variabel agar tidak terlalu panjang ke samping
+                teks_tooltip = f"<b>{row.get('nama', 'Wisata')}</b><br>Jarak Jalan: {j_km:.2f} Km<br>Status: {status}"
+                
+                folium.CircleMarker(
+                    [row.geometry.y, row.geometry.x], 
+                    radius=radius, 
+                    color=warna, 
+                    fill=True, 
+                    tooltip=teks_tooltip
+                ).add_to(m_master)
