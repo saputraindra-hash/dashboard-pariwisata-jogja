@@ -238,4 +238,11 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             wisata_utm = wisata_gdf.to_crs("EPSG:32749")
             faskes_utm = faskes_gdf.to_crs("EPSG:32749")
             
-            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left
+         wisata_utm = wisata_gdf.to_crs("EPSG:32749")
+            faskes_utm = faskes_gdf.to_crs("EPSG:32749")
+            
+            # Baris 241 yang sudah diperbaiki secara utuh:
+            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
+            evaluasi = evaluasi.to_crs("EPSG:4326")
+            
+            zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
