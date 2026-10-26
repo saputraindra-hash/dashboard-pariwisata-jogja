@@ -231,5 +231,8 @@ elif menu == "6. Master Overlay & AI Keselamatan":
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
+           wisata_utm = wisata_gdf.to_crs("EPSG:32749")
+            faskes_utm = faskes_gdf.to_crs("EPSG:32749")
             
-            wisata_utm = wisata_gdf.to_crs("EPSG:3274
+            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
+            evaluasi = evaluasi.to_crs("EPSG:4326")
