@@ -96,7 +96,7 @@ def Tampilkan():
                 titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan:", daftar_bahaya)
             with col_btn:
                 st.markdown("<br>", unsafe_allow_html=True) 
-                tombol_routing = st.button("🚨 Eksekusi API Routing", type="primary", use_container_width=True)
+                tombol_routing = st.button("🚨 Ukur Jarak", type="primary", use_container_width=True)
 
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
