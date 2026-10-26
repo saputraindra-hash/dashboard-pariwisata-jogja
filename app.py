@@ -212,7 +212,15 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                             p2 = (path[i+1][0], path[i+1][1])
                             G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
         return G
+else:
+                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
 
+            # Baris ini menampilkan peta jika data berhasil ditarik
+            st_folium(m_master, width=900, height=550, returned_objects=[])
+            
+        else:
+            # Baris ini memunculkan peringatan jika server Geoportal DIY mati
+            st.error("🚨 Gagal memuat data geospasial. Server Geoportal DIY sedang down atau koneksi lambat. Silakan muat ulang (refresh) halaman ini beberapa saat lagi.")
     with st.spinner("🔄 Memuat Geospasial Instan (Tahap 1)..."):
         url_wisata = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_faskes = "https://geoportal.jogjaprov.go.id/server/rest/services/BPJS/_34_BPJS_FASKES_PT/FeatureServer/216/query?outFields=*&where=1%3D1&outSR=4326&f=json"
