@@ -153,9 +153,6 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
     url_3d = "https://geoportal.jogjaprov.go.id/portal/home/webscene/viewer.html?layers=9e6ed007c45844178ac40d591ce611b8&viewpoint=cam:110.38658731,-7.88794756,149559.231;0,0.489"
     with st.spinner("Memuat ruang 3D..."):
         components.iframe(url_3d, height=650, scrolling=True)
-# ==============================================================================
-# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (DENGAN OFFLINE CACHE)
-# ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
     import networkx as nx
     import json
@@ -231,8 +228,81 @@ elif menu == "6. Master Overlay & AI Keselamatan":
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
-           wisata_utm = wisata_gdf.to_crs("EPSG:32749")
+            
+            wisata_utm = wisata_gdf.to_crs("EPSG:32749")
             faskes_utm = faskes_gdf.to_crs("EPSG:32749")
+            
+            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
+            evaluasi = evaluasi.to_crs("EPSG:4326")
+            
+            zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
+            zona_bahaya = evaluasi[evaluasi['Jarak_Udara_Meter'] > batas_meter]
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Destinasi", len(evaluasi))
+            c2.metric("🔵 Zona Aman (Udara)", len(zona_aman))
+            c3.metric(f"🔴 Zona Bahaya (> {radius_aman_km} Km)", len(zona_bahaya), delta_color="inverse")
+
+            st.markdown("### 🚑 Investigasi Rute Darurat (Zona Bahaya)")
+            
+            daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
+            
+            col_sel, col_btn = st.columns([3, 1])
+            with col_sel:
+                titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan:", daftar_bahaya)
+            with col_btn:
+                st.markdown("<br>", unsafe_allow_html=True) 
+                tombol_dijkstra = st.button("🚨 Eksekusi Dijkstra", type="primary", use_container_width=True)
+
+            m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
+
+            for idx, row in zona_aman.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color="blue", fill=True, tooltip=f"AMAN: {nama}").add_to(m_master)
+
+            for idx, row in zona_bahaya.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=6, color="red", fill=True, tooltip=f"BAHAYA: {nama}").add_to(m_master)
+
+            for idx, row in faskes_gdf.iterrows():
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
+
+            if tombol_dijkstra and titik_investigasi:
+                G_jalan = build_road_graph(raw_jalan)
+                
+                kolom_nama = 'nama_tampil_left' if 'nama_tampil_left' in evaluasi.columns else 'nama_tampil'
+                w_row = zona_bahaya[zona_bahaya[kolom_nama] == titik_investigasi].iloc[0]
+                
+                idx_faskes = w_row['index_right']
+                f_row = faskes_gdf.loc[idx_faskes]
+                
+                titik_w = Point(w_row.geometry.x, w_row.geometry.y)
+                titik_f = Point(f_row.geometry.x, f_row.geometry.y)
+                
+                def cari_simpul(graph, titik):
+                    nodes = list(graph.nodes)
+                    return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
+
+                simpul_w = cari_simpul(G_jalan, titik_w)
+                simpul_f = cari_simpul(G_jalan, titik_f)
+                
+                if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
+                    jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                    rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                    jarak_km = jarak_meter / 1000
+                    
+                    st.warning(f"🚨 **Hasil Dijkstra:** Jarak Udara awalnya adalah **{w_row['Jarak_Udara_Meter']/1000:.2f} Km**, namun menyusuri jalan raya aslinya menjadi **{jarak_km:.2f} Kilometer**.")
+                    
+                    rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
+                    folium.PolyLine(rute_latlon, color="#ff0000", weight=7, opacity=0.9).add_to(m_master)
+                    m_master.fit_bounds(rute_latlon) 
+                else:
+                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
+
+            st_folium(m_master, width=900, height=550, returned_objects=[])
+            
+        else:
+            st.error("🚨 Gagal memuat data geospasial dari API maupun Cache Offline.")
             
             evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
             evaluasi = evaluasi.to_crs("EPSG:4326")
