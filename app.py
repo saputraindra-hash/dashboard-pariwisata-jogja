@@ -155,50 +155,60 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
         components.iframe(url_3d, height=650, scrolling=True)
         
 # ==============================================================================
-# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (FINAL)
+# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (DENGAN OFFLINE CACHE)
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
     import networkx as nx
+    import json
+    import os
     
     st.title("🚨 DSS: Keselamatan Wisata (On-Demand Routing)")
-    st.markdown("Tahap 1 memetakan zona aman/bahaya secara instan (Jarak Udara). Tahap 2 mengeksekusi Dijkstra di jalan raya hanya saat tombol investigasi ditekan.")
+    st.markdown("Sistem dilengkapi **Offline Cache**. Jika server Geoportal down, aplikasi otomatis menggunakan data cadangan lokal.")
     
     radius_aman_km = st.slider("Batas Toleransi Jarak Faskes (Km):", 1.0, 20.0, 5.0, 0.5)
     batas_meter = radius_aman_km * 1000 
     
     @st.cache_data(ttl=3600)
-    def fetch_api_gdf(url, geom_type="point"):
+    def fetch_api_gdf(url, geom_type="point", backup_file="backup.json"):
+        # 1. Coba tarik data dari API dan simpan sebagai backup
         try:
-            res = requests.get(url, timeout=15).json()
-            if 'features' not in res: return gpd.GeoDataFrame(), res
-            
-            records = []
-            for f in res['features']:
-                geom = f.get('geometry')
-                if not geom: continue
-                attr = f.get('attributes', {})
-                
-                # --- AUTO-DETEKSI KOLOM NAMA ---
-                if geom_type == "point":
-                    attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
-                    nama_ditemukan = "Tidak Bernama"
-                    for key, value in attr.items():
-                        if 'nama' in key.lower() or 'name' in key.lower():
-                            if value:
-                                nama_ditemukan = str(value)
-                                break
-                    attr['nama_tampil'] = nama_ditemukan
-                    
-                records.append(attr)
-                
-            df = pd.DataFrame(records)
-            if geom_type == "point":
-                df = df.dropna(subset=['Lat', 'Lon'])
-                geometry = [Point(xy) for xy in zip(df['Lon'], df['Lat'])]
-                return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
-            return df, res
+            res = requests.get(url, timeout=10).json()
+            with open(backup_file, 'w') as f:
+                json.dump(res, f)
+        # 2. Jika API mati/timeout, gunakan data backup lokal
         except:
-            return gpd.GeoDataFrame(), {}
+            if os.path.exists(backup_file):
+                with open(backup_file, 'r') as f:
+                    res = json.load(f)
+            else:
+                return gpd.GeoDataFrame(), {}
+                
+        if 'features' not in res: return gpd.GeoDataFrame(), res
+        
+        records = []
+        for f in res['features']:
+            geom = f.get('geometry')
+            if not geom: continue
+            attr = f.get('attributes', {})
+            
+            if geom_type == "point":
+                attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
+                nama_ditemukan = "Tidak Bernama"
+                for key, value in attr.items():
+                    if 'nama' in key.lower() or 'name' in key.lower():
+                        if value:
+                            nama_ditemukan = str(value)
+                            break
+                attr['nama_tampil'] = nama_ditemukan
+                
+            records.append(attr)
+            
+        df = pd.DataFrame(records)
+        if geom_type == "point":
+            df = df.dropna(subset=['Lat', 'Lon'])
+            geometry = [Point(xy) for xy in zip(df['Lon'], df['Lat'])]
+            return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
+        return df, res
 
     @st.cache_data(ttl=3600)
     def build_road_graph(raw_jalan):
@@ -212,64 +222,20 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                             p2 = (path[i+1][0], path[i+1][1])
                             G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
         return G
-else:
-                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
 
-            # Baris ini menampilkan peta jika data berhasil ditarik
-            st_folium(m_master, width=900, height=550, returned_objects=[])
-            
-        else:
-            # Baris ini memunculkan peringatan jika server Geoportal DIY mati
-            st.error("🚨 Gagal memuat data geospasial. Server Geoportal DIY sedang down atau koneksi lambat. Silakan muat ulang (refresh) halaman ini beberapa saat lagi.")
-    with st.spinner("🔄 Memuat Geospasial Instan (Tahap 1)..."):
+    with st.spinner("🔄 Memuat Geospasial (API / Offline Cache)..."):
         url_wisata = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_faskes = "https://geoportal.jogjaprov.go.id/server/rest/services/BPJS/_34_BPJS_FASKES_PT/FeatureServer/216/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_jalan = "https://geoportal.jogjaprov.go.id/server/rest/services/DPUPESDM/34_DPUPESDM_JALANPROVINSI_2024_LN/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
 
-        wisata_gdf, _ = fetch_api_gdf(url_wisata, "point")
-        faskes_gdf, _ = fetch_api_gdf(url_faskes, "point")
-        _, raw_jalan = fetch_api_gdf(url_jalan, "line")
+        wisata_gdf, _ = fetch_api_gdf(url_wisata, "point", "backup_wisata.json")
+        faskes_gdf, _ = fetch_api_gdf(url_faskes, "point", "backup_faskes.json")
+        _, raw_jalan = fetch_api_gdf(url_jalan, "line", "backup_jalan.json")
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
             
-            # --- TAHAP 1: FILTER UDARA INSTAN ---
             wisata_utm = wisata_gdf.to_crs("EPSG:32749")
             faskes_utm = faskes_gdf.to_crs("EPSG:32749")
             
-            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
-            evaluasi = evaluasi.to_crs("EPSG:4326")
-            
-            zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
-            zona_bahaya = evaluasi[evaluasi['Jarak_Udara_Meter'] > batas_meter]
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Destinasi", len(evaluasi))
-            c2.metric("🔵 Zona Aman (Udara)", len(zona_aman))
-            c3.metric(f"🔴 Zona Bahaya (> {radius_aman_km} Km)", len(zona_bahaya), delta_color="inverse")
-
-            # --- TAHAP 2: PANEL INVESTIGASI DIJKSTRA ---
-            st.markdown("### 🚑 Investigasi Rute Darurat (Zona Bahaya)")
-            
-            daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
-            
-            col_sel, col_btn = st.columns([3, 1])
-            with col_sel:
-                titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan untuk diukur jalan rayanya:", daftar_bahaya)
-            with col_btn:
-                st.markdown("<br>", unsafe_allow_html=True) 
-                tombol_dijkstra = st.button("🚨 Eksekusi Dijkstra", type="primary", use_container_width=True)
-
-            m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
-
-            # Render Titik di Peta
-            for idx, row in zona_aman.iterrows():
-                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color="blue", fill=True, tooltip=f"AMAN: {nama}").add_to(m_master)
-
-            for idx, row in zona_bahaya.iterrows():
-                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=6, color="red", fill=True, tooltip=f"BAHAYA: {nama}").add_to(m_master)
-
-            for idx, row in faskes_gdf.iterrows():
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
+            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left
