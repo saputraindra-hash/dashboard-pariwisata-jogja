@@ -263,7 +263,7 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             for idx, row in faskes_gdf.iterrows():
                 folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
 
-            # --- EKSEKUSI DIJKSTRA SAAT TOMBOL DITEKAN ---
+       # --- EKSEKUSI DIJKSTRA SAAT TOMBOL DITEKAN ---
             if tombol_dijkstra and titik_investigasi:
                 G_jalan = build_road_graph(raw_jalan)
                 
@@ -275,5 +275,28 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 idx_faskes = w_row['index_right']
                 f_row = faskes_gdf.loc[idx_faskes]
                 
+                # PERBAIKAN: Baris ini sudah utuh dan aman
                 titik_w = Point(w_row.geometry.x, w_row.geometry.y)
-                titik_f = Point(f_row.geometry.x, f_row.
+                titik_f = Point(f_row.geometry.x, f_row.geometry.y)
+                
+                def cari_simpul(graph, titik):
+                    nodes = list(graph.nodes)
+                    return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
+
+                simpul_w = cari_simpul(G_jalan, titik_w)
+                simpul_f = cari_simpul(G_jalan, titik_f)
+                
+                if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
+                    jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                    rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
+                    jarak_km = jarak_meter / 1000
+                    
+                    st.warning(f"🚨 **Hasil Dijkstra:** Jarak Udara awalnya adalah **{w_row['Jarak_Udara_Meter']/1000:.2f} Km**, namun jika menggunakan ambulans menyusuri jalan raya, jarak aslinya menjadi **{jarak_km:.2f} Kilometer**.")
+                    
+                    rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
+                    folium.PolyLine(rute_latlon, color="#ff0000", weight=7, opacity=0.9).add_to(m_master)
+                    m_master.fit_bounds(rute_latlon)
+                else:
+                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
+
+            st_folium(m_master, width=900, height=550, returned_objects=[])
