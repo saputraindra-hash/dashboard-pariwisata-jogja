@@ -81,6 +81,14 @@ def Tampilkan():
 
             st.markdown("### 🚑 Investigasi Rute Darurat dengan Global API")
             
+            # --- PENAMBAHAN KETERANGAN WARNA ---
+            st.info("""
+            **Keterangan Simbol Peta:**
+            * 🟢 **Titik Hijau:** Fasilitas Kesehatan (Puskesmas / Rumah Sakit)
+            * 🔵 **Titik Biru:** Destinasi Wisata Zona Aman (Dalam batas toleransi jarak)
+            * 🔴 **Titik Merah:** Destinasi Wisata Zona Rawan (Di luar batas toleransi jarak)
+            """)
+            
             daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
             
             col_sel, col_btn = st.columns([3, 1])
