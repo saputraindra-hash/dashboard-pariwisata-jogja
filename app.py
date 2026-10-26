@@ -4,7 +4,6 @@ import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
 import requests
-import networkx as nx
 from shapely.geometry import Point
 import json
 import os
@@ -57,9 +56,6 @@ elif menu == "5. Peta Evakuasi Regional":
 # MENU 6: HYBRID AI & OSRM GLOBAL ROUTING API
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
-    import json
-    import os
-    
     st.title("🚨 DSS: Keselamatan Wisata (AI Routing API)")
     st.markdown("Menggabungkan data internal Geoportal Pemda dengan **Global Routing API (OSRM)** untuk simulasi navigasi ambulans presisi tinggi hingga ke jalan desa.")
     
@@ -72,14 +68,15 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             res = requests.get(url, timeout=10).json()
             with open(backup_file, 'w') as f:
                 json.dump(res, f)
-        except:
+        except Exception:
             if os.path.exists(backup_file):
                 with open(backup_file, 'r') as f:
                     res = json.load(f)
             else:
                 return gpd.GeoDataFrame(), {}
                 
-        if 'features' not in res: return gpd.GeoDataFrame(), res
+        if 'features' not in res: 
+            return gpd.GeoDataFrame(), res
         
         records = []
         for f in res['features']:
@@ -114,8 +111,6 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         wisata_gdf, _ = fetch_api_gdf(url_wisata, "point", "backup_wisata.json")
         faskes_gdf, _ = fetch_api_gdf(url_faskes, "point", "backup_faskes.json")
         
-        # KITA TIDAK LAGI MENGUNDUH DATA JALAN PROVINSI YANG BERAT KARENA SUDAH PAKAI API OSRM
-
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
             
@@ -157,7 +152,6 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             for idx, row in faskes_gdf.iterrows():
                 folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
 
-            # --- EKSEKUSI OSRM API SAAT TOMBOL DITEKAN ---
             if tombol_routing and titik_investigasi:
                 kolom_nama = 'nama_tampil_left' if 'nama_tampil_left' in evaluasi.columns else 'nama_tampil'
                 w_row = zona_bahaya[zona_bahaya[kolom_nama] == titik_investigasi].iloc[0]
@@ -165,16 +159,14 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 idx_faskes = w_row['index_right']
                 f_row = faskes_gdf.loc[idx_faskes]
                 
-                # Koordinat Asal dan Tujuan
                 lon1, lat1 = w_row.geometry.x, w_row.geometry.y
                 lon2, lat2 = f_row.geometry.x, f_row.geometry.y
                 
-                # Memanggil API OSRM (Format: lon,lat;lon,lat)
                 osrm_url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
                 
                 try:
                     with st.spinner("🛰️ Menghubungkan ke Satelit Routing Global..."):
-                        res_route = requests.get(osrm_url).json()
+                        res_route = requests.get(osrm_url, timeout=10).json()
                         
                         if res_route.get("code") == "Ok":
                             rute_data = res_route["routes"][0]
@@ -182,7 +174,6 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                             durasi_menit = rute_data["duration"] / 60
                             koordinat_geojson = rute_data["geometry"]["coordinates"]
                             
-                            # OSRM memberikan format [lon, lat], Folium butuh [lat, lon]
                             rute_latlon = [[coord[1], coord[0]] for coord in koordinat_geojson]
                             
                             st.warning(f"🚨 **Hasil Analisis Satelit:** Jarak jalan raya aslinya adalah **{jarak_km:.2f} Km**. Waktu tempuh darurat ambulans diperkirakan **{durasi_menit:.0f} Menit**.")
@@ -191,12 +182,10 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                             m_master.fit_bounds(rute_latlon)
                         else:
                             st.error("⚠️ Gagal menemukan rute. Area mungkin terisolasi penuh.")
-                except:
+                except Exception:
                     st.error("⚠️ Gagal terhubung ke API Routing Global.")
 
             st_folium(m_master, width=900, height=550, returned_objects=[])
             
         else:
             st.error("🚨 Gagal memuat data geospasial dari Pemda maupun Cache Offline.")
-        else:
-            st.error("🚨 Gagal memuat data geospasial dari API maupun Cache Offline.")
