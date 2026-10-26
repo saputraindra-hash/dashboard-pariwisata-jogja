@@ -191,17 +191,40 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         except:
             return gpd.GeoDataFrame(), {}
 
-    @st.cache_data(ttl=3600)
-    def build_road_graph(raw_jalan):
-        G = nx.Graph()
-        if 'features' in raw_jalan:
-            for f in raw_jalan['features']:
-                if 'geometry' in f and 'paths' in f['geometry']:
-                    for path in f['geometry']['paths']:
-                        for i in range(len(path)-1):
-                            p1 = (path[i][0], path[i][1])
-                            p2 = (path[i+1][0], path[i+1][1])
-                            G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
+   @st.cache_data(ttl=3600)
+    def fetch_api_gdf(url, geom_type="point"):
+        try:
+            res = requests.get(url, timeout=15).json()
+            if 'features' not in res: return gpd.GeoDataFrame(), res
+            
+            records = []
+            for f in res['features']:
+                geom = f.get('geometry')
+                if not geom: continue
+                attr = f.get('attributes', {})
+                
+                # --- AUTO-DETEKSI KOLOM NAMA ---
+                # Mencari key apapun di dalam data yang mengandung kata 'nama' atau 'name'
+                nama_ditemukan = "Tidak Bernama"
+                for key, value in attr.items():
+                    if 'nama' in key.lower() or 'name' in key.lower():
+                        if value: # Pastikan valuenya tidak None/Kosong
+                            nama_ditemukan = str(value)
+                            break
+                
+                if geom_type == "point":
+                    attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
+                    attr['nama_tampil'] = nama_ditemukan # Menyimpan nama yang berhasil dilacak
+                records.append(attr)
+                
+            df = pd.DataFrame(records)
+            if geom_type == "point":
+                df = df.dropna(subset=['Lat', 'Lon'])
+                geometry = [Point(xy) for xy in zip(df['Lon'], df['Lat'])]
+                return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
+            return df, res
+        except:
+            return gpd.GeoDataFrame(), {}
         return G
 
     with st.spinner("🔄 Memuat Geospasial Instan (Tahap 1)..."):
