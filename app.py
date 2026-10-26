@@ -153,7 +153,6 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
     url_3d = "https://geoportal.jogjaprov.go.id/portal/home/webscene/viewer.html?layers=9e6ed007c45844178ac40d591ce611b8&viewpoint=cam:110.38658731,-7.88794756,149559.231;0,0.489"
     with st.spinner("Memuat ruang 3D..."):
         components.iframe(url_3d, height=650, scrolling=True)
-        
 # ==============================================================================
 # MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (DENGAN OFFLINE CACHE)
 # ==============================================================================
@@ -170,12 +169,10 @@ elif menu == "6. Master Overlay & AI Keselamatan":
     
     @st.cache_data(ttl=3600)
     def fetch_api_gdf(url, geom_type="point", backup_file="backup.json"):
-        # 1. Coba tarik data dari API dan simpan sebagai backup
         try:
             res = requests.get(url, timeout=10).json()
             with open(backup_file, 'w') as f:
                 json.dump(res, f)
-        # 2. Jika API mati/timeout, gunakan data backup lokal
         except:
             if os.path.exists(backup_file):
                 with open(backup_file, 'r') as f:
@@ -235,14 +232,4 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
             
-            wisata_utm = wisata_gdf.to_crs("EPSG:32749")
-            faskes_utm = faskes_gdf.to_crs("EPSG:32749")
-            
-         wisata_utm = wisata_gdf.to_crs("EPSG:32749")
-            faskes_utm = faskes_gdf.to_crs("EPSG:32749")
-            
-            # Baris 241 yang sudah diperbaiki secara utuh:
-            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
-            evaluasi = evaluasi.to_crs("EPSG:4326")
-            
-            zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
+            wisata_utm = wisata_gdf.to_crs("EPSG:3274
