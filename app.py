@@ -54,11 +54,14 @@ elif menu == "5. Peta Evakuasi Regional":
     st.success("Sistem pemetaan daya tampung barak pengungsian berbasis Geoportal.")
 
 # ==============================================================================
-# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA (FINAL)
+# MENU 6: HYBRID AI & OSRM GLOBAL ROUTING API
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
-    st.title("🚨 DSS: Keselamatan Wisata (On-Demand Routing)")
-    st.markdown("Sistem dilengkapi **Offline Cache**. Jika server Geoportal down, aplikasi otomatis menggunakan data cadangan lokal.")
+    import json
+    import os
+    
+    st.title("🚨 DSS: Keselamatan Wisata (AI Routing API)")
+    st.markdown("Menggabungkan data internal Geoportal Pemda dengan **Global Routing API (OSRM)** untuk simulasi navigasi ambulans presisi tinggi hingga ke jalan desa.")
     
     radius_aman_km = st.slider("Batas Toleransi Jarak Faskes (Km):", 1.0, 20.0, 5.0, 0.5)
     batas_meter = radius_aman_km * 1000 
@@ -104,27 +107,14 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326"), res
         return df, res
 
-    @st.cache_data(ttl=3600)
-    def build_road_graph(raw_jalan):
-        G = nx.Graph()
-        if 'features' in raw_jalan:
-            for f in raw_jalan['features']:
-                if 'geometry' in f and 'paths' in f['geometry']:
-                    for path in f['geometry']['paths']:
-                        for i in range(len(path)-1):
-                            p1 = (path[i][0], path[i][1])
-                            p2 = (path[i+1][0], path[i+1][1])
-                            G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
-        return G
-
-    with st.spinner("🔄 Memuat Geospasial (API / Offline Cache)..."):
+    with st.spinner("🔄 Memuat Geospasial Pemda (API / Offline Cache)..."):
         url_wisata = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_faskes = "https://geoportal.jogjaprov.go.id/server/rest/services/BPJS/_34_BPJS_FASKES_PT/FeatureServer/216/query?outFields=*&where=1%3D1&outSR=4326&f=json"
-        url_jalan = "https://geoportal.jogjaprov.go.id/server/rest/services/DPUPESDM/34_DPUPESDM_JALANPROVINSI_2024_LN/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
-
+        
         wisata_gdf, _ = fetch_api_gdf(url_wisata, "point", "backup_wisata.json")
         faskes_gdf, _ = fetch_api_gdf(url_faskes, "point", "backup_faskes.json")
-        _, raw_jalan = fetch_api_gdf(url_jalan, "line", "backup_jalan.json")
+        
+        # KITA TIDAK LAGI MENGUNDUH DATA JALAN PROVINSI YANG BERAT KARENA SUDAH PAKAI API OSRM
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
             faskes_gdf = faskes_gdf.reset_index(drop=True)
@@ -143,7 +133,7 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             c2.metric("🔵 Zona Aman (Udara)", len(zona_aman))
             c3.metric(f"🔴 Zona Bahaya (> {radius_aman_km} Km)", len(zona_bahaya), delta_color="inverse")
 
-            st.markdown("### 🚑 Investigasi Rute Darurat (Zona Bahaya)")
+            st.markdown("### 🚑 Investigasi Rute Darurat dengan Global API")
             
             daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
             
@@ -152,7 +142,7 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan:", daftar_bahaya)
             with col_btn:
                 st.markdown("<br>", unsafe_allow_html=True) 
-                tombol_dijkstra = st.button("🚨 Eksekusi Dijkstra", type="primary", use_container_width=True)
+                tombol_routing = st.button("🚨 Eksekusi API Routing", type="primary", use_container_width=True)
 
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
@@ -167,39 +157,46 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             for idx, row in faskes_gdf.iterrows():
                 folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
 
-            if tombol_dijkstra and titik_investigasi:
-                G_jalan = build_road_graph(raw_jalan)
-                
+            # --- EKSEKUSI OSRM API SAAT TOMBOL DITEKAN ---
+            if tombol_routing and titik_investigasi:
                 kolom_nama = 'nama_tampil_left' if 'nama_tampil_left' in evaluasi.columns else 'nama_tampil'
                 w_row = zona_bahaya[zona_bahaya[kolom_nama] == titik_investigasi].iloc[0]
                 
                 idx_faskes = w_row['index_right']
                 f_row = faskes_gdf.loc[idx_faskes]
                 
-                titik_w = Point(w_row.geometry.x, w_row.geometry.y)
-                titik_f = Point(f_row.geometry.x, f_row.geometry.y)
+                # Koordinat Asal dan Tujuan
+                lon1, lat1 = w_row.geometry.x, w_row.geometry.y
+                lon2, lat2 = f_row.geometry.x, f_row.geometry.y
                 
-                def cari_simpul(graph, titik):
-                    nodes = list(graph.nodes)
-                    return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
-
-                simpul_w = cari_simpul(G_jalan, titik_w)
-                simpul_f = cari_simpul(G_jalan, titik_f)
+                # Memanggil API OSRM (Format: lon,lat;lon,lat)
+                osrm_url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
                 
-                if simpul_w and simpul_f and nx.has_path(G_jalan, simpul_w, simpul_f):
-                    jarak_meter = nx.shortest_path_length(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    rute_simpul = nx.shortest_path(G_jalan, source=simpul_w, target=simpul_f, weight='weight')
-                    jarak_km = jarak_meter / 1000
-                    
-                    st.warning(f"🚨 **Hasil Dijkstra:** Jarak Udara awalnya adalah **{w_row['Jarak_Udara_Meter']/1000:.2f} Km**, namun menyusuri jalan raya aslinya menjadi **{jarak_km:.2f} Kilometer**.")
-                    
-                    rute_latlon = [[lat, lon] for lon, lat in rute_simpul]
-                    folium.PolyLine(rute_latlon, color="#ff0000", weight=7, opacity=0.9).add_to(m_master)
-                    m_master.fit_bounds(rute_latlon) 
-                else:
-                    st.error("⚠️ Jalan terputus. Tidak ada rute darat yang terhubung.")
+                try:
+                    with st.spinner("🛰️ Menghubungkan ke Satelit Routing Global..."):
+                        res_route = requests.get(osrm_url).json()
+                        
+                        if res_route.get("code") == "Ok":
+                            rute_data = res_route["routes"][0]
+                            jarak_km = rute_data["distance"] / 1000
+                            durasi_menit = rute_data["duration"] / 60
+                            koordinat_geojson = rute_data["geometry"]["coordinates"]
+                            
+                            # OSRM memberikan format [lon, lat], Folium butuh [lat, lon]
+                            rute_latlon = [[coord[1], coord[0]] for coord in koordinat_geojson]
+                            
+                            st.warning(f"🚨 **Hasil Analisis Satelit:** Jarak jalan raya aslinya adalah **{jarak_km:.2f} Km**. Waktu tempuh darurat ambulans diperkirakan **{durasi_menit:.0f} Menit**.")
+                            
+                            folium.PolyLine(rute_latlon, color="#ff0000", weight=7, opacity=0.9).add_to(m_master)
+                            m_master.fit_bounds(rute_latlon)
+                        else:
+                            st.error("⚠️ Gagal menemukan rute. Area mungkin terisolasi penuh.")
+                except:
+                    st.error("⚠️ Gagal terhubung ke API Routing Global.")
 
             st_folium(m_master, width=900, height=550, returned_objects=[])
             
+        else:
+            st.error("🚨 Gagal memuat data geospasial dari Pemda maupun Cache Offline.")
         else:
             st.error("🚨 Gagal memuat data geospasial dari API maupun Cache Offline.")
