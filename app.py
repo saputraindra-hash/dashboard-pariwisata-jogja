@@ -155,13 +155,13 @@ elif menu == "5. Peta 3D Topografi & Tata Ruang":
         components.iframe(url_3d, height=650, scrolling=True)
         
 # ==============================================================================
-# MENU 6: HYBRID AI (TWO-STAGE FILTERING: UDARA + DIJKSTRA)
+# MENU 6: HYBRID AI & ON-DEMAND DIJKSTRA
 # ==============================================================================
 elif menu == "6. Master Overlay & AI Keselamatan":
     import networkx as nx
     
-    st.title("🚨 DSS: Keselamatan Wisata (Hybrid Model)")
-    st.markdown("Menggabungkan kecepatan **Jarak Udara** dan akurasi **Algoritma Dijkstra** untuk efisiensi komputasi *real-time*.")
+    st.title("🚨 DSS: Keselamatan Wisata (On-Demand Routing)")
+    st.markdown("Tahap 1 memetakan zona aman/bahaya secara instan (Jarak Udara). Tahap 2 mengeksekusi Dijkstra di jalan raya hanya saat tombol investigasi ditekan.")
     
     radius_aman_km = st.slider("Batas Toleransi Jarak Faskes (Km):", 1.0, 20.0, 5.0, 0.5)
     batas_meter = radius_aman_km * 1000 
@@ -179,6 +179,7 @@ elif menu == "6. Master Overlay & AI Keselamatan":
                 attr = f.get('attributes', {})
                 if geom_type == "point":
                     attr['Lon'], attr['Lat'] = geom.get('x'), geom.get('y')
+                    attr['nama_tampil'] = str(attr.get('nama', 'Tidak Bernama'))
                 records.append(attr)
                 
             df = pd.DataFrame(records)
@@ -190,7 +191,20 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         except:
             return gpd.GeoDataFrame(), {}
 
-    with st.spinner("🔄 Memproses Geospasial Hybrid (Tahap 1 Udara, Tahap 2 Dijkstra)..."):
+    @st.cache_data(ttl=3600)
+    def build_road_graph(raw_jalan):
+        G = nx.Graph()
+        if 'features' in raw_jalan:
+            for f in raw_jalan['features']:
+                if 'geometry' in f and 'paths' in f['geometry']:
+                    for path in f['geometry']['paths']:
+                        for i in range(len(path)-1):
+                            p1 = (path[i][0], path[i][1])
+                            p2 = (path[i+1][0], path[i+1][1])
+                            G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2)) * 111000)
+        return G
+
+    with st.spinner("🔄 Memuat Geospasial Instan (Tahap 1)..."):
         url_wisata = "https://geoportal.jogjaprov.go.id/server/rest/services/DISPAR/34_DISPAR_KUNJ_DTW_2023_PT/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_faskes = "https://geoportal.jogjaprov.go.id/server/rest/services/BPJS/_34_BPJS_FASKES_PT/FeatureServer/216/query?outFields=*&where=1%3D1&outSR=4326&f=json"
         url_jalan = "https://geoportal.jogjaprov.go.id/server/rest/services/DPUPESDM/34_DPUPESDM_JALANPROVINSI_2024_LN/FeatureServer/0/query?outFields=*&where=1%3D1&outSR=4326&f=json"
@@ -200,78 +214,66 @@ elif menu == "6. Master Overlay & AI Keselamatan":
         _, raw_jalan = fetch_api_gdf(url_jalan, "line")
 
         if not wisata_gdf.empty and not faskes_gdf.empty:
+            # Pastikan faskes punya index yang rapi untuk di-join
+            faskes_gdf = faskes_gdf.reset_index(drop=True)
             
-            # --- TAHAP 1: FILTER INSTAN JARAK UDARA ---
+            # --- TAHAP 1: FILTER UDARA INSTAN ---
             wisata_utm = wisata_gdf.to_crs("EPSG:32749")
             faskes_utm = faskes_gdf.to_crs("EPSG:32749")
-            evaluasi_udara = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
-            evaluasi_udara = evaluasi_udara.to_crs("EPSG:4326")
             
-            # Pisahkan data berdasar Udara
-            pasti_rawan = evaluasi_udara[evaluasi_udara['Jarak_Udara_Meter'] > batas_meter].copy()
-            abu_abu = evaluasi_udara[evaluasi_udara['Jarak_Udara_Meter'] <= batas_meter].copy()
+            # sjoin_nearest mengembalikan index_right (index dari Faskes terdekat)
+            evaluasi = gpd.sjoin_nearest(wisata_utm, faskes_utm, how='left', distance_col='Jarak_Udara_Meter')
+            evaluasi = evaluasi.to_crs("EPSG:4326")
             
-            # --- TAHAP 2: DIJKSTRA HANYA UNTUK 10 TITIK ABU-ABU (OPTIMASI DEMO) ---
-            abu_abu_sample = abu_abu.head(10) # Dibatasi agar loading hanya hitungan detik
-            
-            G = nx.Graph()
-            if 'features' in raw_jalan:
-                for f in raw_jalan['features']:
-                    if 'geometry' in f and 'paths' in f['geometry']:
-                        for path in f['geometry']['paths']:
-                            for i in range(len(path)-1):
-                                p1 = (path[i][0], path[i][1])
-                                p2 = (path[i+1][0], path[i+1][1])
-                                G.add_edge(p1, p2, weight=Point(p1).distance(Point(p2))*111000)
+            # Membagi Zona
+            zona_aman = evaluasi[evaluasi['Jarak_Udara_Meter'] <= batas_meter]
+            zona_bahaya = evaluasi[evaluasi['Jarak_Udara_Meter'] > batas_meter]
 
-            def cari_simpul(graph, titik):
-                nodes = list(graph.nodes)
-                return min(nodes, key=lambda n: Point(n).distance(titik)) if nodes else None
-
-            hasil_dijkstra = []
-            for idx, row in abu_abu_sample.iterrows():
-                simpul_w = cari_simpul(G, Point(row.geometry.x, row.geometry.y))
-                jarak_jalan = float('inf')
-                
-                if simpul_w:
-                    for jdx, f_row in faskes_gdf.iterrows():
-                        simpul_f = cari_simpul(G, Point(f_row.geometry.x, f_row.geometry.y))
-                        if simpul_f and nx.has_path(G, simpul_w, simpul_f):
-                            jarak = nx.shortest_path_length(G, source=simpul_w, target=simpul_f, weight='weight')
-                            if jarak < jarak_jalan: jarak_jalan = jarak
-                hasil_dijkstra.append(jarak_jalan)
-                
-            abu_abu_sample['Jarak_Jalan_Meter'] = hasil_dijkstra
-            
-            # Deteksi "Jebakan Peta" (Udara aman, tapi Jalan rawan)
-            hidden_blank_spots = abu_abu_sample[abu_abu_sample['Jarak_Jalan_Meter'] > batas_meter]
-
-            # --- RENDER PETA ---
             c1, c2, c3 = st.columns(3)
-            c1.metric("Rawan (Udara)", len(pasti_rawan))
-            c2.metric("Titik Dijkstra (Sampling)", len(abu_abu_sample))
-            c3.metric("🚨 Hidden Blank Spot (Jebakan)", len(hidden_blank_spots), delta_color="inverse")
+            c1.metric("Total Destinasi", len(evaluasi))
+            c2.metric("🔵 Zona Aman (Udara)", len(zona_aman))
+            c3.metric(f"🔴 Zona Bahaya (> {radius_aman_km} Km)", len(zona_bahaya), delta_color="inverse")
+
+            # --- TAHAP 2: PANEL INVESTIGASI DIJKSTRA ---
+            st.markdown("### 🚑 Investigasi Rute Darurat (Zona Bahaya)")
+            
+            # Mengambil nama-nama wisata yang masuk zona merah saja
+            daftar_bahaya = zona_bahaya['nama_tampil_left'].tolist() if 'nama_tampil_left' in zona_bahaya.columns else zona_bahaya['nama_tampil'].tolist()
+            
+            col_sel, col_btn = st.columns([3, 1])
+            with col_sel:
+                titik_investigasi = st.selectbox("Pilih Titik Wisata Rawan untuk diukur jalan rayanya:", daftar_bahaya)
+            with col_btn:
+                st.markdown("<br>", unsafe_allow_html=True) # Perataan tombol
+                tombol_dijkstra = st.button("🚨 Eksekusi Dijkstra", type="primary", use_container_width=True)
 
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
-            # Render Pasti Rawan (Merah)
-            for idx, row in pasti_rawan.iterrows():
-                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=8, color="red", fill=True, tooltip=f"<b>{row.get('nama', 'Wisata')}</b><br>Pasti Rawan (Udara > {radius_aman_km} Km)").add_to(m_master)
+            # Render Zona Aman (Biru)
+            for idx, row in zona_aman.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color="blue", fill=True, tooltip=f"AMAN: {nama}").add_to(m_master)
 
-           # Render Hasil Dijkstra
-            for idx, row in abu_abu_sample.iterrows():
-                j_km = row['Jarak_Jalan_Meter'] / 1000
-                warna = "orange" if j_km > radius_aman_km else "blue" # Orange = Jebakan
-                radius = 8 if j_km > radius_aman_km else 4
-                status = "HIDDEN BLANK SPOT" if j_km > radius_aman_km else "AMAN"
+            # Render Zona Bahaya (Merah)
+            for idx, row in zona_bahaya.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=6, color="red", fill=True, tooltip=f"BAHAYA: {nama}").add_to(m_master)
+
+            # Render Semua Faskes (Hijau)
+            for idx, row in faskes_gdf.iterrows():
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
+
+            # --- EKSEKUSI DIJKSTRA SAAT TOMBOL DITEKAN ---
+            if tombol_dijkstra and titik_investigasi:
+                G_jalan = build_road_graph(raw_jalan)
                 
-                # Teks dipisah ke variabel agar tidak terlalu panjang ke samping
-                teks_tooltip = f"<b>{row.get('nama', 'Wisata')}</b><br>Jarak Jalan: {j_km:.2f} Km<br>Status: {status}"
+                # Cari baris data Wisata yang dipilih
+                kolom_nama = 'nama_tampil_left' if 'nama_tampil_left' in evaluasi.columns else 'nama_tampil'
+                w_row = zona_bahaya[zona_bahaya[kolom_nama] == titik_investigasi].iloc[0]
                 
-                folium.CircleMarker(
-                    [row.geometry.y, row.geometry.x], 
-                    radius=radius, 
-                    color=warna, 
-                    fill=True, 
-                    tooltip=teks_tooltip
-                ).add_to(m_master)
+                # Cari baris Faskes terdekat yang sudah ditandai oleh sjoin
+                idx_faskes = w_row['index_right']
+                f_row = faskes_gdf.loc[idx_faskes]
+                
+                titik_w = Point(w_row.geometry.x, w_row.geometry.y)
+                titik_f = Point(f_row.geometry.x, f_row.
