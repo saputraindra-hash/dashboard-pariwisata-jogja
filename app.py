@@ -255,4 +255,13 @@ elif menu == "6. Master Overlay & AI Keselamatan":
             m_master = folium.Map(location=[-7.90, 110.50], zoom_start=10, tiles='OpenStreetMap')
 
             # Render Titik di Peta
-            for idx, row in zona_aman.iterrows
+            for idx, row in zona_aman.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color="blue", fill=True, tooltip=f"AMAN: {nama}").add_to(m_master)
+
+            for idx, row in zona_bahaya.iterrows():
+                nama = row.get('nama_tampil_left', row.get('nama_tampil', 'Wisata'))
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=6, color="red", fill=True, tooltip=f"BAHAYA: {nama}").add_to(m_master)
+
+            for idx, row in faskes_gdf.iterrows():
+                folium.CircleMarker([row.geometry.y, row.geometry.x], radius=3, color="green", fill=True, tooltip=f"Faskes: {row['nama_tampil']}").add_to(m_master)
